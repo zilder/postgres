@@ -46,7 +46,22 @@ pg_attribute_aligned(2)
 #endif
 ItemPointerData;
 
+typedef struct ItemPointerExtData
+{
+	Oid				ip_relid;
+	BlockIdData		ip_blkid;
+	OffsetNumber	ip_posid;
+}
+
+/* If compiler understands packed and aligned pragmas, use those */
+#if defined(pg_attribute_packed) && defined(pg_attribute_aligned)
+pg_attribute_packed()
+pg_attribute_aligned(2)
+#endif
+ItemPointerExtData;
+
 typedef ItemPointerData *ItemPointer;
+typedef ItemPointerExtData *ItemPointerExt;
 
 /* ----------------
  *		support macros

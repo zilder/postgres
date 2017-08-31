@@ -52,6 +52,15 @@ typedef struct IndexTupleData
 
 typedef IndexTupleData *IndexTuple;
 
+typedef struct IndexTupleExtData
+{
+	ItemPointerExtData t_tid;	/* reference TID to heap tuple */
+	unsigned short t_info;		/* various info about tuple */
+
+} IndexTupleExtData;
+
+typedef IndexTupleExtData *IndexTupleExt;
+
 typedef struct IndexAttributeBitMapData
 {
 	bits8		bits[(INDEX_MAX_KEYS + 8 - 1) / 8];
