@@ -59,7 +59,7 @@ static bool _bt_check_rowcompare(ScanKey skey,
  *		The result is intended for use with _bt_compare().
  */
 ScanKey
-_bt_mkscankey(Relation rel, IndexTuple itup)
+_bt_mkscankey(Relation rel, InMemoryIndexTuple itup)
 {
 	ScanKey		skey;
 	TupleDesc	itupdesc;
@@ -85,7 +85,7 @@ _bt_mkscankey(Relation rel, IndexTuple itup)
 		 * comparison can be needed.
 		 */
 		procinfo = index_getprocinfo(rel, i + 1, BTORDER_PROC);
-		arg = index_getattr(itup, i + 1, itupdesc, &null);
+		arg = im_index_getattr(itup, i + 1, itupdesc, &null);
 		flags = (null ? SK_ISNULL : 0) | (indoption[i] << SK_BT_INDOPTION_SHIFT);
 		ScanKeyEntryInitializeWithInfo(&skey[i],
 									   flags,

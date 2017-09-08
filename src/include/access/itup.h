@@ -82,6 +82,20 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 #define IndexTupleHasVarwidths(itup) ((((IndexTuple) (itup))->t_info & INDEX_VAR_MASK))
 
 
+
+typedef struct InMemoryIndexTupleData
+{
+	ItemPointerExtData	t_tid;			/* reference TID to heap tuple */
+	unsigned short		t_info;			/* various info about tuple */
+	IndexAttributeBitMapData t_nulls;	/* nulls bitmap */
+	Size				t_len;			/* tuple data size only */
+	void			   *t_data;			/* tuple data */
+} InMemoryIndexTupleData;
+
+typedef InMemoryIndexTupleData *InMemoryIndexTuple;
+
+
+
 /*
  * Takes an infomask as argument (primarily because this needs to be usable
  * at index_form_tuple time so enough space is allocated).
@@ -135,6 +149,40 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 	) \
 )
 
+#define im_index_getattr(tup, attnum, tupleDesc, isnull) \
+( \
+	AssertMacro(PointerIsValid(isnull) && (attnum) > 0), \
+	*(isnull) = false, \
+	(!((InMemoryIndexTuple) (itup))->t_info & INDEX_NULL_MASK) ? \
+	( \
+		(tupleDesc)->attrs[(attnum)-1]->attcacheoff >= 0 ? \
+		( \
+			fetchatt((tupleDesc)->attrs[(attnum)-1], \
+			(char *) ((InMemoryIndexTuple) (itup))->t_data \
+			+ (tupleDesc)->attrs[(attnum)-1]->attcacheoff) \
+		) \
+		: \
+			im_nocache_index_getattr((tup), (attnum), (tupleDesc)) \
+	) \
+	: \
+	( \
+		(att_isnull((attnum)-1, (char *)(tup) + sizeof(IndexTupleData))) ? \
+		( \
+			*(isnull) = true, \
+			(Datum)NULL \
+		) \
+		: \
+		( \
+			im_nocache_index_getattr((tup), (attnum), (tupleDesc)) \
+		) \
+	) \
+)
+
+/* TODO: add different size options for global and local index tuple */
+#define im_index_tuple_size(tup) \
+	MAXALIGN(IndexInfoFindDataOffset((tup)->t_info) + (tup)->t_len)
+
+
 /*
  * MaxIndexTuplesPerPage is an upper bound on the number of tuples that can
  * fit on one index page.  An index tuple must have either data or a null
@@ -151,10 +199,22 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 /* routines in indextuple.c */
 extern IndexTuple index_form_tuple(TupleDesc tupleDescriptor,
 				 Datum *values, bool *isnull);
+extern void index_form_inmemory_tuple(TupleDesc tupleDescriptor,
+						  Datum *values,
+						  bool *isnull,
+						  InMemoryIndexTuple itup);
+void *index_form_tuple_data(TupleDesc tupleDescriptor,
+					  Datum *values, bool *isnull,
+					  Size *data_size, unsigned short *ret_infomask);
 extern Datum nocache_index_getattr(IndexTuple tup, int attnum,
 					  TupleDesc tupleDesc);
+extern Datum im_nocache_index_getattr(InMemoryIndexTuple tup,
+						 int attnum,
+						 TupleDesc tupleDesc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 				   Datum *values, bool *isnull);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
+
+extern IndexTuple im_index_tuple_to_physical_format(InMemoryIndexTuple itup);
 
 #endif							/* ITUP_H */

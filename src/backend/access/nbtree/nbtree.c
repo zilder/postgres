@@ -321,15 +321,29 @@ btinsert(Relation rel, Datum *values, bool *isnull,
 		 IndexInfo *indexInfo)
 {
 	bool		result;
-	IndexTuple	itup;
+	// IndexTuple	itup;
+	Size		data_size;
+	unsigned short infomask;
+	void	   *tuple_data;
+	InMemoryIndexTupleData itup;
 
-	/* generate an index tuple */
-	itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
-	itup->t_tid = *ht_ctid;
+	/* generate an index tuple data */
+	// tuple_data = index_form_tuple_data(RelationGetDescr(rel),
+	// 								   values, isnull,
+	// 								   &data_size, &infomask);
+	index_form_inmemory_tuple(RelationGetDescr(rel),
+							  values, isnull,
+							  &itup);
 
-	result = _bt_doinsert(rel, itup, checkUnique, heapRel);
+	// itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
+	// itup->t_tid = *ht_ctid;
+	itup.t_tid.ip_relid = RelationGetRelid(heapRel);
+	itup.t_tid.ip_blkid = ht_ctid->ip_blkid;
+	itup.t_tid.ip_posid = ht_ctid->ip_posid;
 
-	pfree(itup);
+	result = _bt_doinsert(rel, &itup, checkUnique, heapRel);
+
+	// pfree(itup);
 
 	return result;
 }

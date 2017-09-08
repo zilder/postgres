@@ -21,6 +21,12 @@
 #include "access/tuptoaster.h"
 
 
+static Datum nocache_index_getattr_common(char *tuple_data,
+							 char *nulls,
+							 unsigned infomask,
+							 int attnum,
+							 TupleDesc tupleDesc);
+
 /* ----------------------------------------------------------------
  *				  index_ tuple interface routines
  * ----------------------------------------------------------------
@@ -185,6 +191,154 @@ index_form_tuple(TupleDesc tupleDescriptor,
 	return tuple;
 }
 
+
+
+/*
+ *
+ * Note: infomask doesn't contain tuple size. Caller should set it depending on
+ * choosen index tuple type
+ */
+void
+index_form_inmemory_tuple(TupleDesc tupleDescriptor,
+						  Datum *values,
+						  bool *isnull,
+						  InMemoryIndexTuple itup)
+{
+	Size		size;
+	int			i;
+	bool		hasnull = false;
+	uint16		tupmask = 0;
+	int			numberOfAttributes = tupleDescriptor->natts;
+
+#ifdef TOAST_INDEX_HACK
+	Datum		untoasted_values[INDEX_MAX_KEYS];
+	bool		untoasted_free[INDEX_MAX_KEYS];
+#endif
+
+	itup->t_info = 0;
+
+	if (numberOfAttributes > INDEX_MAX_KEYS)
+		ereport(ERROR,
+				(errcode(ERRCODE_TOO_MANY_COLUMNS),
+				 errmsg("number of index columns (%d) exceeds limit (%d)",
+						numberOfAttributes, INDEX_MAX_KEYS)));
+
+#ifdef TOAST_INDEX_HACK
+	for (i = 0; i < numberOfAttributes; i++)
+	{
+		Form_pg_attribute att = tupleDescriptor->attrs[i];
+
+		untoasted_values[i] = values[i];
+		untoasted_free[i] = false;
+
+		/* Do nothing if value is NULL or not of varlena type */
+		if (isnull[i] || att->attlen != -1)
+			continue;
+
+		/*
+		 * If value is stored EXTERNAL, must fetch it so we are not depending
+		 * on outside storage.  This should be improved someday.
+		 */
+		if (VARATT_IS_EXTERNAL(DatumGetPointer(values[i])))
+		{
+			untoasted_values[i] =
+				PointerGetDatum(heap_tuple_fetch_attr((struct varlena *)
+													  DatumGetPointer(values[i])));
+			untoasted_free[i] = true;
+		}
+
+		/*
+		 * If value is above size target, and is of a compressible datatype,
+		 * try to compress it in-line.
+		 */
+		if (!VARATT_IS_EXTENDED(DatumGetPointer(untoasted_values[i])) &&
+			VARSIZE(DatumGetPointer(untoasted_values[i])) > TOAST_INDEX_TARGET &&
+			(att->attstorage == 'x' || att->attstorage == 'm'))
+		{
+			Datum		cvalue = toast_compress_datum(untoasted_values[i]);
+
+			if (DatumGetPointer(cvalue) != NULL)
+			{
+				/* successful compression */
+				if (untoasted_free[i])
+					pfree(DatumGetPointer(untoasted_values[i]));
+				untoasted_values[i] = cvalue;
+				untoasted_free[i] = true;
+			}
+		}
+	}
+#endif
+
+	for (i = 0; i < numberOfAttributes; i++)
+	{
+		if (isnull[i])
+		{
+			hasnull = true;
+			break;
+		}
+	}
+
+	if (hasnull)
+		itup->t_info |= INDEX_NULL_MASK;
+
+#ifdef TOAST_INDEX_HACK
+	size = heap_compute_data_size(tupleDescriptor,
+								  untoasted_values, isnull);
+#else
+	size = heap_compute_data_size(tupleDescriptor,
+								  values, isnull);
+#endif
+	itup->t_data = palloc0(size);
+
+	heap_fill_tuple(tupleDescriptor,
+#ifdef TOAST_INDEX_HACK
+					untoasted_values,
+#else
+					values,
+#endif
+					isnull,
+					(char *) itup->t_data,
+					size,
+					&tupmask,
+					(hasnull ? (bits8 *) &itup->t_nulls : NULL));
+
+#ifdef TOAST_INDEX_HACK
+	for (i = 0; i < numberOfAttributes; i++)
+	{
+		if (untoasted_free[i])
+			pfree(DatumGetPointer(untoasted_values[i]));
+	}
+#endif
+
+	/*
+	 * We do this because heap_fill_tuple wants to initialize a "tupmask"
+	 * which is used for HeapTuples, but we want an indextuple infomask. The
+	 * only relevant info is the "has variable attributes" field. We have
+	 * already set the hasnull bit above.
+	 */
+	if (tupmask & HEAP_HASVARWIDTH)
+		itup->t_info |= INDEX_VAR_MASK;
+
+	/* Also assert we got rid of external attributes */
+#ifdef TOAST_INDEX_HACK
+	Assert((tupmask & HEAP_HASEXTERNAL) == 0);
+#endif
+
+	/*
+	 * Here we make sure that the size will fit in the field reserved for it
+	 * in t_info.
+	 */
+	if ((size & INDEX_SIZE_MASK) != size)
+		ereport(ERROR,
+				(errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
+				 errmsg("index row requires %zu bytes, maximum size is %zu",
+						size, (Size) INDEX_SIZE_MASK)));
+}
+
+
+
+
+
 /* ----------------
  *		nocache_index_getattr
  *
@@ -209,11 +363,36 @@ nocache_index_getattr(IndexTuple tup,
 					  int attnum,
 					  TupleDesc tupleDesc)
 {
+	return nocache_index_getattr_common((char *) tup + IndexInfoFindDataOffset(tup->t_info),
+								 (char *) tup + sizeof(IndexTupleData),
+								 tup->t_info,
+								 attnum,
+								 tupleDesc);
+}
+
+Datum
+im_nocache_index_getattr(InMemoryIndexTuple tup,
+						 int attnum,
+						 TupleDesc tupleDesc)
+{
+	return nocache_index_getattr_common((char *) tup->t_data,
+								 (tup->t_info & INDEX_NULL_MASK) ? (char *) &tup->t_nulls : NULL,
+								 tup->t_info,
+								 attnum,
+								 tupleDesc);
+}
+
+static Datum
+nocache_index_getattr_common(char *tuple_data,
+							 char *nulls,
+							 unsigned infomask,
+							 int attnum,
+							 TupleDesc tupleDesc)
+{
 	Form_pg_attribute *att = tupleDesc->attrs;
 	char	   *tp;				/* ptr to data part of tuple */
 	bits8	   *bp = NULL;		/* ptr to null bitmap in tuple */
 	bool		slow = false;	/* do we have to walk attrs? */
-	int			data_off;		/* tuple data offset */
 	int			off;			/* current offset within data */
 
 	/* ----------------
@@ -225,11 +404,9 @@ nocache_index_getattr(IndexTuple tup,
 	 * ----------------
 	 */
 
-	data_off = IndexInfoFindDataOffset(tup->t_info);
-
 	attnum--;
 
-	if (IndexTupleHasNulls(tup))
+	if (nulls)
 	{
 		/*
 		 * there's a null somewhere in the tuple
@@ -238,7 +415,7 @@ nocache_index_getattr(IndexTuple tup,
 		 */
 
 		/* XXX "knows" t_bits are just after fixed tuple header! */
-		bp = (bits8 *) ((char *) tup + sizeof(IndexTupleData));
+		bp = (bits8 *) nulls;
 
 		/*
 		 * Now check to see if any preceding bits are null...
@@ -267,7 +444,7 @@ nocache_index_getattr(IndexTuple tup,
 		}
 	}
 
-	tp = (char *) tup + data_off;
+	tp = tuple_data;
 
 	if (!slow)
 	{
@@ -286,7 +463,7 @@ nocache_index_getattr(IndexTuple tup,
 		 * target.  If there aren't any, it's safe to cheaply initialize the
 		 * cached offsets for these attrs.
 		 */
-		if (IndexTupleHasVarwidths(tup))
+		if (infomask & INDEX_VAR_MASK)
 		{
 			int			j;
 
@@ -357,7 +534,8 @@ nocache_index_getattr(IndexTuple tup,
 		off = 0;
 		for (i = 0;; i++)		/* loop exit is at "break" */
 		{
-			if (IndexTupleHasNulls(tup) && att_isnull(i, bp))
+			// if (IndexTupleHasNulls(tup) && att_isnull(i, bp))
+			if (infomask & INDEX_NULL_MASK && att_isnull(i, bp))
 			{
 				usecache = false;
 				continue;		/* this cannot be the target att */
@@ -440,4 +618,33 @@ CopyIndexTuple(IndexTuple source)
 	result = (IndexTuple) palloc(size);
 	memcpy(result, source, size);
 	return result;
+}
+
+/*
+ *
+ */
+IndexTuple
+im_index_tuple_to_physical_format(InMemoryIndexTuple itup)
+{
+	Size		tupsize = im_index_tuple_size(itup);
+	IndexTuple	tup = palloc0(tupsize);
+
+	tup->t_tid.ip_blkid = itup->t_tid.ip_blkid;
+	tup->t_tid.ip_posid = itup->t_tid.ip_posid;
+
+	tup->t_info = itup->t_info;
+	Assert((tupsize & INDEX_SIZE_MASK) != tupsize);
+	tup->t_info |= tupsize;
+
+	/* Copy nulls bitmask */
+	if (tup->t_info & INDEX_NULL_MASK)
+		memcpy((char *) tup + sizeof(IndexTuple),
+			   (char *) &itup->t_nulls,
+			   sizeof(IndexAttributeBitMapData));
+
+	memcpy((char *) tup + IndexInfoFindDataOffset(tup->t_info),
+		   itup->t_data,
+		   itup->t_len);
+
+	return tup;
 }
