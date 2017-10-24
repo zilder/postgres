@@ -289,6 +289,7 @@ index_form_inmemory_tuple(TupleDesc tupleDescriptor,
 								  values, isnull);
 #endif
 	itup->t_data = palloc0(size);
+	itup->t_len = size;
 
 	heap_fill_tuple(tupleDescriptor,
 #ifdef TOAST_INDEX_HACK
@@ -605,6 +606,21 @@ index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 	}
 }
 
+void
+im_index_deform_tuple(InMemoryIndexTuple tup, TupleDesc tupleDescriptor,
+					  Datum *values, bool *isnull)
+{
+	int			i;
+
+	/* Assert to protect callers who allocate fixed-size arrays */
+	Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
+
+	for (i = 0; i < tupleDescriptor->natts; i++)
+	{
+		values[i] = im_index_getattr(tup, i + 1, tupleDescriptor, &isnull[i]);
+	}
+}
+
 /*
  * Create a palloc'd copy of an index tuple.
  */
@@ -633,7 +649,7 @@ im_index_tuple_to_physical_format(InMemoryIndexTuple itup)
 	tup->t_tid.ip_posid = itup->t_tid.ip_posid;
 
 	tup->t_info = itup->t_info;
-	Assert((tupsize & INDEX_SIZE_MASK) != tupsize);
+	Assert((tupsize & INDEX_SIZE_MASK) == tupsize);
 	tup->t_info |= tupsize;
 
 	/* Copy nulls bitmask */

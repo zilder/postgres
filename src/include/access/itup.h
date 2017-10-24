@@ -153,12 +153,12 @@ typedef InMemoryIndexTupleData *InMemoryIndexTuple;
 ( \
 	AssertMacro(PointerIsValid(isnull) && (attnum) > 0), \
 	*(isnull) = false, \
-	(!((InMemoryIndexTuple) (itup))->t_info & INDEX_NULL_MASK) ? \
+	(!(((InMemoryIndexTuple) (tup))->t_info & INDEX_NULL_MASK)) ? \
 	( \
 		(tupleDesc)->attrs[(attnum)-1]->attcacheoff >= 0 ? \
 		( \
 			fetchatt((tupleDesc)->attrs[(attnum)-1], \
-			(char *) ((InMemoryIndexTuple) (itup))->t_data \
+			(char *) ((InMemoryIndexTuple) (tup))->t_data \
 			+ (tupleDesc)->attrs[(attnum)-1]->attcacheoff) \
 		) \
 		: \
@@ -213,6 +213,9 @@ extern Datum im_nocache_index_getattr(InMemoryIndexTuple tup,
 						 TupleDesc tupleDesc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 				   Datum *values, bool *isnull);
+extern void im_index_deform_tuple(InMemoryIndexTuple tup,
+					  TupleDesc tupleDescriptor,
+					  Datum *values, bool *isnull);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
 
 extern IndexTuple im_index_tuple_to_physical_format(InMemoryIndexTuple itup);
