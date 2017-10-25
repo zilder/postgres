@@ -195,6 +195,12 @@ typedef InMemoryIndexTupleData *InMemoryIndexTuple;
 	((int) ((BLCKSZ - SizeOfPageHeaderData) / \
 			(MAXALIGN(sizeof(IndexTupleData) + 1) + sizeof(ItemIdData))))
 
+#define FreeInMemoryIndexTuple(imtup) \
+	do { \
+		pfree((imtup)->t_data); \
+		pfree(imtup); \
+	} while (0)
+
 
 /* routines in indextuple.c */
 extern IndexTuple index_form_tuple(TupleDesc tupleDescriptor,
@@ -218,6 +224,7 @@ extern void im_index_deform_tuple(InMemoryIndexTuple tup,
 					  Datum *values, bool *isnull);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
 
-extern IndexTuple im_index_tuple_to_physical_format(InMemoryIndexTuple itup);
+extern IndexTuple inmemory_index_tuple_to_physical_format(InMemoryIndexTuple itup);
+extern InMemoryIndexTuple physical_index_tuple_to_inmemory_format(IndexTuple tup);
 
 #endif							/* ITUP_H */

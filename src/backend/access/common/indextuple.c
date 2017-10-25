@@ -640,7 +640,7 @@ CopyIndexTuple(IndexTuple source)
  *
  */
 IndexTuple
-im_index_tuple_to_physical_format(InMemoryIndexTuple itup)
+inmemory_index_tuple_to_physical_format(InMemoryIndexTuple itup)
 {
 	Size		tupsize = im_index_tuple_size(itup);
 	IndexTuple	tup = palloc0(tupsize);
@@ -654,7 +654,7 @@ im_index_tuple_to_physical_format(InMemoryIndexTuple itup)
 
 	/* Copy nulls bitmask */
 	if (tup->t_info & INDEX_NULL_MASK)
-		memcpy((char *) tup + sizeof(IndexTuple),
+		memcpy((char *) tup + sizeof(IndexTupleData),
 			   (char *) &itup->t_nulls,
 			   sizeof(IndexAttributeBitMapData));
 
@@ -663,4 +663,42 @@ im_index_tuple_to_physical_format(InMemoryIndexTuple itup)
 		   itup->t_len);
 
 	return tup;
+}
+
+
+	ItemPointerExtData	t_tid;			/* reference TID to heap tuple */
+	unsigned short		t_info;			/* various info about tuple */
+	IndexAttributeBitMapData t_nulls;	/* nulls bitmap */
+	Size				t_len;			/* tuple data size only */
+	void			   *t_data;
+
+/*
+ *
+ */
+InMemoryIndexTuple
+physical_index_tuple_to_inmemory_format(IndexTuple tup)
+{
+	InMemoryIndexTuple imtup = palloc0(sizeof(InMemoryIndexTupleData));
+
+	// imtup->t_tid.ip_blkid = tup->t_tid.ip_blkid;
+	// BlockIdSet(&((imtup)->t_tid.ip_blkid), tup);
+	imtup->t_data = palloc0(IndexTupleSize(tup));
+	BlockIdCopy(&((imtup)->t_tid.ip_blkid), &tup->t_tid.ip_blkid);
+	imtup->t_tid.ip_posid = tup->t_tid.ip_posid;
+	imtup->t_info = tup->t_info;
+	imtup->t_len = IndexTupleSize(tup);
+
+	/* Copy nulls bitmask */
+	if (tup->t_info & INDEX_NULL_MASK)
+	{
+		memcpy(&imtup->t_nulls,
+			   tup + sizeof(IndexTupleData),
+			   sizeof(IndexAttributeBitMapData));
+	}
+
+	memcpy(imtup->t_data,
+		   (char *) tup + IndexInfoFindDataOffset(tup->t_info),
+		   imtup->t_len);
+
+	return imtup;
 }

@@ -321,16 +321,9 @@ btinsert(Relation rel, Datum *values, bool *isnull,
 		 IndexInfo *indexInfo)
 {
 	bool		result;
-	// IndexTuple	itup;
-	Size		data_size;
-	unsigned short infomask;
-	void	   *tuple_data;
 	InMemoryIndexTupleData itup;
 
 	/* generate an index tuple data */
-	// tuple_data = index_form_tuple_data(RelationGetDescr(rel),
-	// 								   values, isnull,
-	// 								   &data_size, &infomask);
 	index_form_inmemory_tuple(RelationGetDescr(rel),
 							  values, isnull,
 							  &itup);

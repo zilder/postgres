@@ -764,8 +764,8 @@ _bt_insertonpg(Relation rel,
 			 BufferGetBlockNumber(buf));
 
 	// itemsz = IndexTupleDSize(*itup);
+	itup = inmemory_index_tuple_to_physical_format(im_itup);
 	itemsz = im_index_tuple_size(im_itup);
-	itup = im_index_tuple_to_physical_format(im_itup);
 	itemsz = MAXALIGN(itemsz);	/* be safe, PageAddItem will do this but we
 								 * need to be consistent */
 
@@ -1655,84 +1655,91 @@ _bt_insert_parent(Relation rel,
 	 * from the root.  This is not super-efficient, but it's rare enough not
 	 * to matter.
 	 */
-//	if (is_root)
-//	{
-//		Buffer		rootbuf;
-//
-//		Assert(stack == NULL);
-//		Assert(is_only);
-//		/* create a new root node and update the metapage */
-//		rootbuf = _bt_newroot(rel, buf, rbuf);
-//		/* release the split buffers */
-//		_bt_relbuf(rel, rootbuf);
-//		_bt_relbuf(rel, rbuf);
-//		_bt_relbuf(rel, buf);
-//	}
-//	else
-//	{
-//		BlockNumber bknum = BufferGetBlockNumber(buf);
-//		BlockNumber rbknum = BufferGetBlockNumber(rbuf);
-//		Page		page = BufferGetPage(buf);
-//		IndexTuple	new_item;
-//		BTStackData fakestack;
-//		IndexTuple	ritem;
-//		Buffer		pbuf;
-//
-//		if (stack == NULL)
-//		{
-//			BTPageOpaque lpageop;
-//
-//			elog(DEBUG2, "concurrent ROOT page split");
-//			lpageop = (BTPageOpaque) PageGetSpecialPointer(page);
-//			/* Find the leftmost page at the next level up */
-//			pbuf = _bt_get_endpoint(rel, lpageop->btpo.level + 1, false,
-//									NULL);
-//			/* Set up a phony stack entry pointing there */
-//			stack = &fakestack;
-//			stack->bts_blkno = BufferGetBlockNumber(pbuf);
-//			stack->bts_offset = InvalidOffsetNumber;
-//			/* bts_btentry will be initialized below */
-//			stack->bts_parent = NULL;
-//			_bt_relbuf(rel, pbuf);
-//		}
-//
-//		/* get high key from left page == lowest key on new right page */
-//		ritem = (IndexTuple) PageGetItem(page,
-//										 PageGetItemId(page, P_HIKEY));
-//
-//		/* form an index tuple that points at the new right page */
-//		new_item = CopyIndexTuple(ritem);
-//		ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
-//
-//		/*
-//		 * Find the parent buffer and get the parent page.
-//		 *
-//		 * Oops - if we were moved right then we need to change stack item! We
-//		 * want to find parent pointing to where we are, right ?	- vadim
-//		 * 05/27/97
-//		 */
-//		ItemPointerSet(&(stack->bts_btentry.t_tid), bknum, P_HIKEY);
-//		pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
-//
-//		/*
-//		 * Now we can unlock the right child. The left child will be unlocked
-//		 * by _bt_insertonpg().
-//		 */
-//		_bt_relbuf(rel, rbuf);
-//
-//		/* Check for error only after writing children */
-//		if (pbuf == InvalidBuffer)
-//			elog(ERROR, "failed to re-find parent key in index \"%s\" for split pages %u/%u",
-//				 RelationGetRelationName(rel), bknum, rbknum);
-//
-//		/* Recursively update the parent */
-//		_bt_insertonpg(rel, pbuf, buf, stack->bts_parent,
-//					   new_item, stack->bts_offset + 1,
-//					   is_only);
-//
-//		/* be tidy */
-//		pfree(new_item);
-//	}
+	if (is_root)
+	{
+		Buffer		rootbuf;
+
+		Assert(stack == NULL);
+		Assert(is_only);
+		/* create a new root node and update the metapage */
+		rootbuf = _bt_newroot(rel, buf, rbuf);
+		/* release the split buffers */
+		_bt_relbuf(rel, rootbuf);
+		_bt_relbuf(rel, rbuf);
+		_bt_relbuf(rel, buf);
+	}
+	else
+	{
+		BlockNumber bknum = BufferGetBlockNumber(buf);
+		BlockNumber rbknum = BufferGetBlockNumber(rbuf);
+		Page		page = BufferGetPage(buf);
+		// IndexTuple	new_item;
+		InMemoryIndexTuple new_item;
+		BTStackData fakestack;
+		IndexTuple	ritem;
+		Buffer		pbuf;
+
+		if (stack == NULL)
+		{
+			BTPageOpaque lpageop;
+
+			elog(DEBUG2, "concurrent ROOT page split");
+			lpageop = (BTPageOpaque) PageGetSpecialPointer(page);
+			/* Find the leftmost page at the next level up */
+			pbuf = _bt_get_endpoint(rel, lpageop->btpo.level + 1, false,
+									NULL);
+			/* Set up a phony stack entry pointing there */
+			stack = &fakestack;
+			stack->bts_blkno = BufferGetBlockNumber(pbuf);
+			stack->bts_offset = InvalidOffsetNumber;
+			/* bts_btentry will be initialized below */
+			stack->bts_parent = NULL;
+			_bt_relbuf(rel, pbuf);
+		}
+
+		/* get high key from left page == lowest key on new right page */
+		// if (global)	/* TODO: depending on whether it global index or not */
+		ritem = (IndexTuple) PageGetItem(page,
+										 PageGetItemId(page, P_HIKEY));
+
+		/* form an index tuple that points at the new right page */
+		// new_item = CopyIndexTuple(ritem);
+		// ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+		new_item = physical_index_tuple_to_inmemory_format(ritem);
+		/* TODO: write ItemPointerExtSet() macro */
+		ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+		new_item->t_tid.ip_relid = RelationGetRelid(rel);
+
+		/*
+		 * Find the parent buffer and get the parent page.
+		 *
+		 * Oops - if we were moved right then we need to change stack item! We
+		 * want to find parent pointing to where we are, right ?	- vadim
+		 * 05/27/97
+		 */
+		ItemPointerSet(&(stack->bts_btentry.t_tid), bknum, P_HIKEY);
+		pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
+
+		/*
+		 * Now we can unlock the right child. The left child will be unlocked
+		 * by _bt_insertonpg().
+		 */
+		_bt_relbuf(rel, rbuf);
+
+		/* Check for error only after writing children */
+		if (pbuf == InvalidBuffer)
+			elog(ERROR, "failed to re-find parent key in index \"%s\" for split pages %u/%u",
+				 RelationGetRelationName(rel), bknum, rbknum);
+
+		/* Recursively update the parent */
+		_bt_insertonpg(rel, pbuf, buf, stack->bts_parent,
+					   new_item, stack->bts_offset + 1,
+					   is_only);
+
+		/* be tidy */
+		// pfree(new_item);
+		FreeInMemoryIndexTuple(new_item);
+	}
 }
 
 /*
