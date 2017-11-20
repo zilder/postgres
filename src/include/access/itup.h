@@ -52,6 +52,15 @@ typedef struct IndexTupleData
 
 typedef IndexTupleData *IndexTuple;
 
+typedef struct IndexTupleExtData
+{
+	ItemPointerExtData t_tid;	/* reference TID to heap tuple */
+	unsigned short t_info;		/* various info about tuple */
+
+} IndexTupleExtData;
+
+typedef IndexTupleExtData *IndexTupleExt;
+
 typedef struct IndexAttributeBitMapData
 {
 	bits8		bits[(INDEX_MAX_KEYS + 8 - 1) / 8];
@@ -72,6 +81,88 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 #define IndexTupleHasNulls(itup)	((((IndexTuple) (itup))->t_info & INDEX_NULL_MASK))
 #define IndexTupleHasVarwidths(itup) ((((IndexTuple) (itup))->t_info & INDEX_VAR_MASK))
 
+#define REGULAR_KIND	0
+#define EXTENDED_KIND	1
+
+/*
+ * Wrapper for different types of index tuple
+ */
+typedef struct IndexTupleProxyData
+{
+	uint16	tuple_kind;
+	Pointer tuple;
+} IndexTupleProxyData;
+
+typedef IndexTupleProxyData *IndexTupleProxy;
+
+#define IndexTupleProxySize(itp) \
+	( \
+		(itp)->tuple_kind == REGULAR_KIND ?	\
+			(Size) (((IndexTuple) (itp)->tuple)->t_info & INDEX_SIZE_MASK) : \
+			(Size) (((IndexTupleExt) (itp)->tuple)->t_info & INDEX_SIZE_MASK) \
+	)
+
+/* #define ITProxyDSize(itup)		((Size) ((itup).t_info & INDEX_SIZE_MASK)) */
+
+#define IndexTupleProxyHasNulls(itp) \
+	( \
+		(itp)->tuple_kind == REGULAR_KIND ?	\
+			(((IndexTuple) (itp)->tuple)->t_info & INDEX_NULL_MASK) : \
+			(((IndexTupleExt) (itp)->tuple)->t_info & INDEX_NULL_MASK) \
+	)
+
+#define IndexTupleProxyHasVarwidths(itp) \
+	( \
+		(itp)->tuple_kind == REGULAR_KIND ?	\
+			(((IndexTuple) (itp)->tuple)->t_info & INDEX_VAR_MASK) : \
+			(((IndexTupleExt) (itp)->tuple)->t_info & INDEX_VAR_MASK) \
+	)
+
+#define IndexTupleProxySetItemPointer(itp, relid, ctid) \
+	do { \
+		if ((itp)->tuple_kind == REGULAR_KIND) \
+			((IndexTuple) (itp)->tuple)->t_tid = (ctid); \
+		else \
+			((IndexTupleExt) (itp)->tuple)->t_tid.ip_blkid = (ctid).ip_blkid; \
+			((IndexTupleExt) (itp)->tuple)->t_tid.ip_posid = (ctid).ip_posid; \
+			((IndexTupleExt) (itp)->tuple)->t_tid.ip_relid = (relid); \
+	} while (0)
+
+#define IndexTupleProxySetInfoMask(itp, infomask) \
+	do { \
+		if ((itp)->tuple_kind == REGULAR_KIND) \
+			((IndexTuple) (itp)->tuple)->t_info = (infomask); \
+		else \
+			((IndexTupleExt) (itp)->tuple)->t_info = (infomask); \
+	} while (0)
+
+#define IndexTupleProxyGetInfoMask(itp) \
+	((itp)->tuple_kind == REGULAR_KIND) ? \
+			((IndexTuple) (itp)->tuple)->t_info : \
+			((IndexTupleExt) (itp)->tuple)->t_info
+
+#define IndexTupleProxyNullsMask(itp) \
+	( \
+		(itp)->tuple_kind == REGULAR_KIND ? \
+			((char *) ((IndexTuple) (itp)->tuple) + sizeof(IndexTupleData)) : \
+			((char *) ((IndexTupleExt) (itp)->tuple) + sizeof(IndexTupleData)) \
+	)
+
+#define IndexInfoFindDataOffsetByKind(t_info, kind) \
+( \
+	(!((t_info) & INDEX_NULL_MASK)) ? \
+	( \
+		((kind) == REGULAR_KIND) ? \
+			(Size)MAXALIGN(sizeof(IndexTupleData)) : \
+			(Size)MAXALIGN(sizeof(IndexTupleExtData)) \
+	) \
+	: \
+	( \
+		((kind) == REGULAR_KIND) ? \
+			(Size)MAXALIGN(sizeof(IndexTupleData) + sizeof(IndexAttributeBitMapData)) : \
+			(Size)MAXALIGN(sizeof(IndexTupleExtData) + sizeof(IndexAttributeBitMapData)) \
+	) \
+)
 
 /*
  * Takes an infomask as argument (primarily because this needs to be usable
@@ -97,6 +188,36 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
  *
  * ----------------
  */
+#define index_tuple_proxy_getattr(itp, attnum, tupleDesc, isnull) \
+( \
+	AssertMacro(PointerIsValid(isnull) && (attnum) > 0), \
+	*(isnull) = false, \
+	!IndexTupleProxyHasNulls(itp) ? \
+	( \
+		TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff >= 0 ? \
+		( \
+			fetchatt(TupleDescAttr((tupleDesc), (attnum)-1), \
+			(char *) (itp)->tuple \
+			+ IndexInfoFindDataOffsetByKind(IndexTupleProxyGetInfoMask(itp), (itp)->tuple_kind) \
+			+ TupleDescAttr((tupleDesc), (attnum)-1)->attcacheoff) \
+		) \
+		: \
+			nocache_index_tuple_proxy_getattr((itp), (attnum), (tupleDesc)) \
+	) \
+	: \
+	( \
+		(att_isnull((attnum)-1, IndexTupleProxyNullsMask(itp))) ? \
+		( \
+			*(isnull) = true, \
+			(Datum)NULL \
+		) \
+		: \
+		( \
+			nocache_index_tuple_proxy_getattr((itp), (attnum), (tupleDesc)) \
+		) \
+	) \
+)
+
 #define index_getattr(tup, attnum, tupleDesc, isnull) \
 ( \
 	AssertMacro(PointerIsValid(isnull) && (attnum) > 0), \
@@ -142,6 +263,12 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 /* routines in indextuple.c */
 extern IndexTuple index_form_tuple(TupleDesc tupleDescriptor,
 				 Datum *values, bool *isnull);
+IndexTupleProxy index_form_tuple_proxy(TupleDesc tupleDescriptor,
+				 Datum *values,
+				 bool *isnull);
+extern Datum nocache_index_tuple_proxy_getattr(IndexTupleProxy itp,
+								  int attnum,
+								  TupleDesc tupleDesc);
 extern Datum nocache_index_getattr(IndexTuple tup, int attnum,
 					  TupleDesc tupleDesc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,

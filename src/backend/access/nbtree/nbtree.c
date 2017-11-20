@@ -321,15 +321,20 @@ btinsert(Relation rel, Datum *values, bool *isnull,
 		 IndexInfo *indexInfo)
 {
 	bool		result;
-	IndexTuple	itup;
+	// IndexTuple	itup;
+	IndexTupleProxy itproxy;
 
 	/* generate an index tuple */
-	itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
-	itup->t_tid = *ht_ctid;
+	// itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
+	itproxy = index_form_tuple_proxy(RelationGetDescr(rel), values, isnull);
+	// itproxy->t_tid = *ht_ctid;
+	IndexTupleProxySetItemPointer(itproxy,
+								  RelationGetRelid(heapRel),
+								 *ht_ctid);
 
-	result = _bt_doinsert(rel, itup, checkUnique, heapRel);
+	result = _bt_doinsert(rel, itproxy, checkUnique, heapRel);
 
-	pfree(itup);
+	pfree(itproxy);
 
 	return result;
 }

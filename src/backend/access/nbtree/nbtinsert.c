@@ -59,7 +59,7 @@ static void _bt_findinsertloc(Relation rel,
 				  OffsetNumber *offsetptr,
 				  int keysz,
 				  ScanKey scankey,
-				  IndexTuple newtup,
+				  IndexTupleProxy newtup,
 				  BTStack stack,
 				  Relation heapRel);
 static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf,
@@ -105,7 +105,7 @@ static void _bt_vacuum_one_page(Relation rel, Buffer buffer, Relation heapRel);
  *		that's just a coding artifact.)
  */
 bool
-_bt_doinsert(Relation rel, IndexTuple itup,
+_bt_doinsert(Relation rel, IndexTupleProxy itp,
 			 IndexUniqueCheck checkUnique, Relation heapRel)
 {
 	bool		is_unique = false;
@@ -116,7 +116,7 @@ _bt_doinsert(Relation rel, IndexTuple itup,
 	OffsetNumber offset;
 
 	/* we need an insertion scan key to do our search, so build one */
-	itup_scankey = _bt_mkscankey(rel, itup);
+	itup_scankey = _bt_mkscankey(rel, itp);
 
 top:
 	/* find the first page containing this key */
@@ -159,35 +159,35 @@ top:
 	 * let the tuple in and return false for possibly non-unique, or true for
 	 * definitely unique.
 	 */
-	if (checkUnique != UNIQUE_CHECK_NO)
-	{
-		TransactionId xwait;
-		uint32		speculativeToken;
-
-		offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
-		xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
-								 checkUnique, &is_unique, &speculativeToken);
-
-		if (TransactionIdIsValid(xwait))
-		{
-			/* Have to wait for the other guy ... */
-			_bt_relbuf(rel, buf);
-
-			/*
-			 * If it's a speculative insertion, wait for it to finish (ie. to
-			 * go ahead with the insertion, or kill the tuple).  Otherwise
-			 * wait for the transaction to finish as usual.
-			 */
-			if (speculativeToken)
-				SpeculativeInsertionWait(xwait, speculativeToken);
-			else
-				XactLockTableWait(xwait, rel, &itup->t_tid, XLTW_InsertIndex);
-
-			/* start over... */
-			_bt_freestack(stack);
-			goto top;
-		}
-	}
+//	if (checkUnique != UNIQUE_CHECK_NO)
+//	{
+//		TransactionId xwait;
+//		uint32		speculativeToken;
+//
+//		offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
+//		xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
+//								 checkUnique, &is_unique, &speculativeToken);
+//
+//		if (TransactionIdIsValid(xwait))
+//		{
+//			/* Have to wait for the other guy ... */
+//			_bt_relbuf(rel, buf);
+//
+//			/*
+//			 * If it's a speculative insertion, wait for it to finish (ie. to
+//			 * go ahead with the insertion, or kill the tuple).  Otherwise
+//			 * wait for the transaction to finish as usual.
+//			 */
+//			if (speculativeToken)
+//				SpeculativeInsertionWait(xwait, speculativeToken);
+//			else
+//				XactLockTableWait(xwait, rel, &itup->t_tid, XLTW_InsertIndex);
+//
+//			/* start over... */
+//			_bt_freestack(stack);
+//			goto top;
+//		}
+//	}
 
 	if (checkUnique != UNIQUE_CHECK_EXISTING)
 	{
@@ -200,9 +200,9 @@ top:
 		 */
 		CheckForSerializableConflictIn(rel, NULL, buf);
 		/* do the insertion */
-		_bt_findinsertloc(rel, &buf, &offset, natts, itup_scankey, itup,
+		_bt_findinsertloc(rel, &buf, &offset, natts, itup_scankey, itp,
 						  stack, heapRel);
-		_bt_insertonpg(rel, buf, InvalidBuffer, stack, itup, offset, false);
+		_bt_insertonpg(rel, buf, InvalidBuffer, stack, itp, offset, false);
 	}
 	else
 	{
@@ -543,7 +543,7 @@ _bt_findinsertloc(Relation rel,
 				  OffsetNumber *offsetptr,
 				  int keysz,
 				  ScanKey scankey,
-				  IndexTuple newtup,
+				  IndexTupleProxy newtup,
 				  BTStack stack,
 				  Relation heapRel)
 {
@@ -558,7 +558,8 @@ _bt_findinsertloc(Relation rel,
 
 	lpageop = (BTPageOpaque) PageGetSpecialPointer(page);
 
-	itemsz = IndexTupleDSize(*newtup);
+	// itemsz = IndexTupleDSize(*newtup);
+	itemsz = IndexTupleProxySize(newtup);
 	itemsz = MAXALIGN(itemsz);	/* be safe, PageAddItem will do this but we
 								 * need to be consistent */
 
@@ -755,7 +756,8 @@ _bt_insertonpg(Relation rel,
 		elog(ERROR, "cannot insert to incompletely split page %u",
 			 BufferGetBlockNumber(buf));
 
-	itemsz = IndexTupleDSize(*itup);
+	// itemsz = IndexTupleDSize(*itup);
+	itemsz = IndexTupleProxySize(itup);
 	itemsz = MAXALIGN(itemsz);	/* be safe, PageAddItem will do this but we
 								 * need to be consistent */
 

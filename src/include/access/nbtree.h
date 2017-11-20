@@ -467,7 +467,7 @@ extern void _bt_parallel_advance_array_keys(IndexScanDesc scan);
 /*
  * prototypes for functions in nbtinsert.c
  */
-extern bool _bt_doinsert(Relation rel, IndexTuple itup,
+extern bool _bt_doinsert(Relation rel, IndexTupleProxy itp,
 			 IndexUniqueCheck checkUnique, Relation heapRel);
 extern Buffer _bt_getstackbuf(Relation rel, BTStack stack, int access);
 extern void _bt_finish_split(Relation rel, Buffer bbuf, BTStack stack);
@@ -514,7 +514,7 @@ extern Buffer _bt_get_endpoint(Relation rel, uint32 level, bool rightmost,
 /*
  * prototypes for functions in nbtutils.c
  */
-extern ScanKey _bt_mkscankey(Relation rel, IndexTuple itup);
+extern ScanKey _bt_mkscankey(Relation rel, IndexTupleProxy itp);
 extern ScanKey _bt_mkscankey_nodata(Relation rel);
 extern void _bt_freeskey(ScanKey skey);
 extern void _bt_freestack(BTStack stack);

@@ -148,6 +148,7 @@ typedef struct IndexInfo
 	bool		ii_Concurrent;
 	bool		ii_BrokenHotChain;
 	void	   *ii_AmCache;
+	bool		ii_Global;
 	MemoryContext ii_Context;
 } IndexInfo;
 

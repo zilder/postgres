@@ -1683,6 +1683,7 @@ BuildIndexInfo(Relation index)
 
 	/* other info */
 	ii->ii_Unique = indexStruct->indisunique;
+	ii->ii_Global = indexStruct->indisglobal;
 	ii->ii_ReadyForInserts = IndexIsReady(indexStruct);
 	/* assume not doing speculative insertion for now */
 	ii->ii_UniqueOps = NULL;
