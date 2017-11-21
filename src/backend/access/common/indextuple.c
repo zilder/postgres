@@ -192,7 +192,8 @@ index_form_tuple_proxy(TupleDesc tupleDescriptor,
 {
 	char	   *tp;				/* tuple pointer */
 	IndexTupleProxy	proxy;		/* return tuple */
-	Size		size,
+	Size		proxy_size,
+				size,
 				data_size,
 				hoff;
 	int			i;
@@ -280,9 +281,12 @@ index_form_tuple_proxy(TupleDesc tupleDescriptor,
 #endif
 	size = hoff + data_size;
 	size = MAXALIGN(size);		/* be conservative */
+	proxy_size = MAXALIGN(sizeof(IndexTupleProxyData));
 
-	tp = (char *) palloc0(size);
-	proxy = (IndexTupleProxy) palloc(sizeof(IndexTupleProxy));
+	proxy = (IndexTupleProxy) palloc0(proxy_size + size);
+	tp = (char *) proxy + proxy_size;
+	// proxy = (IndexTupleProxy) palloc(sizeof(IndexTupleProxy));
+	proxy->tuple_kind = REGULAR_KIND;
 	proxy->tuple = (Pointer) tp;
 	// tuple = (IndexTuple) tp;
 
