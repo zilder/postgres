@@ -90,7 +90,7 @@ typedef IndexAttributeBitMapData * IndexAttributeBitMap;
 typedef struct IndexTupleProxyData
 {
 	uint16	tuple_kind;
-	Pointer tuple;
+	Item	tuple;
 } IndexTupleProxyData;
 
 typedef IndexTupleProxyData *IndexTupleProxy;
@@ -118,14 +118,16 @@ typedef IndexTupleProxyData *IndexTupleProxy;
 			(((IndexTupleExt) (itp)->tuple)->t_info & INDEX_VAR_MASK) \
 	)
 
-#define IndexTupleProxySetItemPointer(itp, relid, ctid) \
+#define IndexTupleProxySetItemPointer(itp, relid, blkno, posid) \
 	do { \
-		if ((itp)->tuple_kind == REGULAR_KIND) \
-			((IndexTuple) (itp)->tuple)->t_tid = (ctid); \
-		else \
-			((IndexTupleExt) (itp)->tuple)->t_tid.ip_blkid = (ctid).ip_blkid; \
-			((IndexTupleExt) (itp)->tuple)->t_tid.ip_posid = (ctid).ip_posid; \
+		if ((itp)->tuple_kind == REGULAR_KIND) { \
+			BlockIdSet(&(((IndexTuple) (itp)->tuple)->t_tid.ip_blkid), (blkno)); \
+			((IndexTuple) (itp)->tuple)->t_tid.ip_posid = (posid); \
+		} else { \
 			((IndexTupleExt) (itp)->tuple)->t_tid.ip_relid = (relid); \
+			BlockIdSet(&(((IndexTupleExt) (itp)->tuple)->t_tid.ip_blkid), (blkno)); \
+			((IndexTupleExt) (itp)->tuple)->t_tid.ip_posid = (posid); \
+		} \
 	} while (0)
 
 #define IndexTupleProxySetInfoMask(itp, infomask) \
@@ -274,5 +276,6 @@ extern Datum nocache_index_getattr(IndexTuple tup, int attnum,
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 				   Datum *values, bool *isnull);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
+extern IndexTupleProxy CopyIndexTupleProxy(IndexTupleProxy source);
 
 #endif							/* ITUP_H */

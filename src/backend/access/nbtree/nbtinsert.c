@@ -64,12 +64,12 @@ static void _bt_findinsertloc(Relation rel,
 				  Relation heapRel);
 static void _bt_insertonpg(Relation rel, Buffer buf, Buffer cbuf,
 			   BTStack stack,
-			   IndexTuple itup,
+			   IndexTupleProxy itp,
 			   OffsetNumber newitemoff,
 			   bool split_only_page);
 static Buffer _bt_split(Relation rel, Buffer buf, Buffer cbuf,
 		  OffsetNumber firstright, OffsetNumber newitemoff, Size newitemsz,
-		  IndexTuple newitem, bool newitemonleft);
+		  IndexTupleProxy newitem, bool newitemonleft);
 static void _bt_insert_parent(Relation rel, Buffer buf, Buffer rbuf,
 				  BTStack stack, bool is_root, bool is_only);
 static OffsetNumber _bt_findsplitloc(Relation rel, Page page,
@@ -79,7 +79,7 @@ static OffsetNumber _bt_findsplitloc(Relation rel, Page page,
 static void _bt_checksplitloc(FindSplitData *state,
 				  OffsetNumber firstoldonright, bool newitemonleft,
 				  int dataitemstoleft, Size firstoldonrightsz);
-static bool _bt_pgaddtup(Page page, Size itemsize, IndexTuple itup,
+static bool _bt_pgaddtup(Page page, Size itemsize, IndexTupleProxy itp,
 			 OffsetNumber itup_off);
 static bool _bt_isequal(TupleDesc itupdesc, Page page, OffsetNumber offnum,
 			int keysz, ScanKey scankey);
@@ -736,7 +736,7 @@ _bt_insertonpg(Relation rel,
 			   Buffer buf,
 			   Buffer cbuf,
 			   BTStack stack,
-			   IndexTuple itup,
+			   IndexTupleProxy itp,
 			   OffsetNumber newitemoff,
 			   bool split_only_page)
 {
@@ -757,7 +757,7 @@ _bt_insertonpg(Relation rel,
 			 BufferGetBlockNumber(buf));
 
 	// itemsz = IndexTupleDSize(*itup);
-	itemsz = IndexTupleProxySize(itup);
+	itemsz = IndexTupleProxySize(itp);
 	itemsz = MAXALIGN(itemsz);	/* be safe, PageAddItem will do this but we
 								 * need to be consistent */
 
@@ -782,7 +782,7 @@ _bt_insertonpg(Relation rel,
 
 		/* split the buffer into left and right halves */
 		rbuf = _bt_split(rel, buf, cbuf, firstright,
-						 newitemoff, itemsz, itup, newitemonleft);
+						 newitemoff, itemsz, itp, newitemonleft);
 		PredicateLockPageSplit(rel,
 							   BufferGetBlockNumber(buf),
 							   BufferGetBlockNumber(rbuf));
@@ -842,7 +842,7 @@ _bt_insertonpg(Relation rel,
 		/* Do the update.  No ereport(ERROR) until changes are logged */
 		START_CRIT_SECTION();
 
-		if (!_bt_pgaddtup(page, itemsz, itup, newitemoff))
+		if (!_bt_pgaddtup(page, itemsz, itp, newitemoff))
 			elog(PANIC, "failed to add new item to block %u in index \"%s\"",
 				 itup_blkno, RelationGetRelationName(rel));
 
@@ -873,7 +873,7 @@ _bt_insertonpg(Relation rel,
 			xl_btree_metadata xlmeta;
 			uint8		xlinfo;
 			XLogRecPtr	recptr;
-			IndexTupleData trunctuple;
+			// IndexTupleData trunctuple;
 
 			xlrec.offnum = itup_off;
 
@@ -910,13 +910,28 @@ _bt_insertonpg(Relation rel,
 			XLogRegisterBuffer(0, buf, REGBUF_STANDARD);
 			if (!P_ISLEAF(lpageop) && newitemoff == P_FIRSTDATAKEY(lpageop))
 			{
-				trunctuple = *itup;
-				trunctuple.t_info = sizeof(IndexTupleData);
-				XLogRegisterBufData(0, (char *) &trunctuple,
-									sizeof(IndexTupleData));
+				if (itp->tuple_kind == REGULAR_KIND)
+				{
+					IndexTupleData trunctuple;
+
+					trunctuple = *(IndexTuple) itp->tuple;
+					trunctuple.t_info = sizeof(IndexTupleData);
+					XLogRegisterBufData(0, (char *) &trunctuple,
+										sizeof(IndexTupleData));
+				}
+				else
+				{
+					IndexTupleExtData trunctuple;
+
+					trunctuple = *(IndexTupleExt) itp->tuple;
+					trunctuple.t_info = sizeof(IndexTupleExtData);
+					XLogRegisterBufData(0, (char *) &trunctuple,
+										sizeof(IndexTupleExtData));
+				}
 			}
 			else
-				XLogRegisterBufData(0, (char *) itup, IndexTupleDSize(*itup));
+				XLogRegisterBufData(0, (char *) itp->tuple, IndexTupleProxySize(itp));
+				// XLogRegisterBufData(0, (char *) itup, IndexTupleDSize(*itup));
 
 			recptr = XLogInsert(RM_BTREE_ID, xlinfo);
 
@@ -960,7 +975,7 @@ _bt_insertonpg(Relation rel,
  */
 static Buffer
 _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
-		  OffsetNumber newitemoff, Size newitemsz, IndexTuple newitem,
+		  OffsetNumber newitemoff, Size newitemsz, IndexTupleProxy newitem,
 		  bool newitemonleft)
 {
 	Buffer		rbuf;
@@ -977,7 +992,9 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	BTPageOpaque sopaque = NULL;
 	Size		itemsz;
 	ItemId		itemid;
-	IndexTuple	item;
+	// IndexTuple	item;
+	IndexTupleProxyData item_obj;
+	IndexTupleProxy item = &item_obj;
 	OffsetNumber leftoff,
 				rightoff;
 	OffsetNumber maxoff;
@@ -1051,8 +1068,11 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	{
 		itemid = PageGetItemId(origpage, P_HIKEY);
 		itemsz = ItemIdGetLength(itemid);
-		item = (IndexTuple) PageGetItem(origpage, itemid);
-		if (PageAddItem(rightpage, (Item) item, itemsz, rightoff,
+		
+		/* TODO: determine tuple kind */
+		item->tuple_kind = REGULAR_KIND;
+		item->tuple = PageGetItem(origpage, itemid);
+		if (PageAddItem(rightpage, item->tuple, itemsz, rightoff,
 						false, false) == InvalidOffsetNumber)
 		{
 			memset(rightpage, 0, BufferGetPageSize(rbuf));
@@ -1080,9 +1100,11 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 		/* existing item at firstright will become first on right page */
 		itemid = PageGetItemId(origpage, firstright);
 		itemsz = ItemIdGetLength(itemid);
-		item = (IndexTuple) PageGetItem(origpage, itemid);
+		/* TODO: determine tuple kind */
+		item->tuple_kind = REGULAR_KIND;
+		item->tuple = PageGetItem(origpage, itemid);
 	}
-	if (PageAddItem(leftpage, (Item) item, itemsz, leftoff,
+	if (PageAddItem(leftpage, item->tuple, itemsz, leftoff,
 					false, false) == InvalidOffsetNumber)
 	{
 		memset(rightpage, 0, BufferGetPageSize(rbuf));
@@ -1104,7 +1126,9 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	{
 		itemid = PageGetItemId(origpage, i);
 		itemsz = ItemIdGetLength(itemid);
-		item = (IndexTuple) PageGetItem(origpage, itemid);
+		/* TODO: determine tuple kind */
+		item->tuple_kind = REGULAR_KIND;
+		item->tuple = PageGetItem(origpage, itemid);
 
 		/* does new item belong before this one? */
 		if (i == newitemoff)
@@ -1309,9 +1333,11 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 			 * if XLogInsert decides it needs a full-page image of the left
 			 * page.
 			 */
+			/* TODO: determine size based on tuple kind */
 			itemid = PageGetItemId(origpage, P_HIKEY);
-			item = (IndexTuple) PageGetItem(origpage, itemid);
-			XLogRegisterBufData(0, (char *) item, MAXALIGN(IndexTupleSize(item)));
+			item->tuple_kind = REGULAR_KIND;
+			item->tuple = PageGetItem(origpage, itemid);
+			XLogRegisterBufData(0, (char *) item, MAXALIGN(IndexTupleProxySize(item)));
 		}
 
 		/*
@@ -1665,9 +1691,11 @@ _bt_insert_parent(Relation rel,
 		BlockNumber bknum = BufferGetBlockNumber(buf);
 		BlockNumber rbknum = BufferGetBlockNumber(rbuf);
 		Page		page = BufferGetPage(buf);
-		IndexTuple	new_item;
+		// IndexTuple	new_item;
+		IndexTupleProxy	new_item;
 		BTStackData fakestack;
-		IndexTuple	ritem;
+		// IndexTuple	ritem;
+		IndexTupleProxyData	ritem;
 		Buffer		pbuf;
 
 		if (stack == NULL)
@@ -1689,12 +1717,14 @@ _bt_insert_parent(Relation rel,
 		}
 
 		/* get high key from left page == lowest key on new right page */
-		ritem = (IndexTuple) PageGetItem(page,
-										 PageGetItemId(page, P_HIKEY));
+		ritem.tuple_kind = REGULAR_KIND;
+		ritem.tuple = PageGetItem(page, PageGetItemId(page, P_HIKEY));
 
 		/* form an index tuple that points at the new right page */
-		new_item = CopyIndexTuple(ritem);
-		ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+		new_item = CopyIndexTupleProxy(&ritem);
+		// ItemPointerSet(&(new_item->t_tid), rbknum, P_HIKEY);
+		/* TODO: Put relid instead InvalidOid */
+		IndexTupleProxySetItemPointer(new_item, InvalidOid, rbknum, P_HIKEY);
 
 		/*
 		 * Find the parent buffer and get the parent page.
@@ -2088,21 +2118,32 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 static bool
 _bt_pgaddtup(Page page,
 			 Size itemsize,
-			 IndexTuple itup,
+			 IndexTupleProxy itp,
 			 OffsetNumber itup_off)
 {
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 	IndexTupleData trunctuple;
+	IndexTupleExtData trunctuple_ext;
 
 	if (!P_ISLEAF(opaque) && itup_off == P_FIRSTDATAKEY(opaque))
 	{
-		trunctuple = *itup;
-		trunctuple.t_info = sizeof(IndexTupleData);
-		itup = &trunctuple;
-		itemsize = sizeof(IndexTupleData);
+		if (itp->tuple_kind == REGULAR_KIND)
+		{
+			trunctuple = *(IndexTuple) itp->tuple;
+			trunctuple.t_info = sizeof(IndexTupleData);
+			itp->tuple = (Item) &trunctuple;
+			itemsize = sizeof(IndexTupleData);
+		}
+		else
+		{
+			trunctuple_ext = *(IndexTupleExt) itp;
+			trunctuple_ext.t_info = sizeof(IndexTupleData);
+			itp->tuple = (Item) &trunctuple_ext;
+			itemsize = sizeof(IndexTupleExtData);
+		}
 	}
 
-	if (PageAddItem(page, (Item) itup, itemsize, itup_off,
+	if (PageAddItem(page, itp->tuple, itemsize, itup_off,
 					false, false) == InvalidOffsetNumber)
 		return false;
 

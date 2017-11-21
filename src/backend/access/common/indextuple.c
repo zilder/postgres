@@ -367,7 +367,7 @@ nocache_index_tuple_proxy_getattr(IndexTupleProxy itp,
 	char	   *tp;				/* ptr to data part of tuple */
 	bits8	   *bp = NULL;		/* ptr to null bitmap in tuple */
 	bool		slow = false;	/* do we have to walk attrs? */
-	int			data_off;		/* tuple data offset */
+	// int			data_off;		/* tuple data offset */
 	int			off;			/* current offset within data */
 
 	/* ----------------
@@ -808,5 +808,23 @@ CopyIndexTuple(IndexTuple source)
 	size = IndexTupleSize(source);
 	result = (IndexTuple) palloc(size);
 	memcpy(result, source, size);
+	return result;
+}
+
+
+IndexTupleProxy
+CopyIndexTupleProxy(IndexTupleProxy source)
+{
+	IndexTupleProxy	result;
+	Size	tuple_size;
+	Size	proxy_size;
+
+	proxy_size = MAXALIGN(sizeof(IndexTupleProxy));
+	tuple_size = IndexTupleProxySize(source);
+
+	result = (IndexTupleProxy) palloc(proxy_size + tuple_size);
+	memcpy(result->tuple, source->tuple, tuple_size);
+	result->tuple_kind = source->tuple_kind;
+	result->tuple = (char *) result + proxy_size;
 	return result;
 }

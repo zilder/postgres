@@ -1683,7 +1683,9 @@ BuildIndexInfo(Relation index)
 
 	/* other info */
 	ii->ii_Unique = indexStruct->indisunique;
-	ii->ii_Global = indexStruct->indisglobal;
+	/* TODO: take it from pg_index_form */
+	// ii->ii_Global = indexStruct->indisglobal;
+	ii->ii_Global = false;
 	ii->ii_ReadyForInserts = IndexIsReady(indexStruct);
 	/* assume not doing speculative insertion for now */
 	ii->ii_UniqueOps = NULL;

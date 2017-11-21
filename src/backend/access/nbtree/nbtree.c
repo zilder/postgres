@@ -330,7 +330,8 @@ btinsert(Relation rel, Datum *values, bool *isnull,
 	// itproxy->t_tid = *ht_ctid;
 	IndexTupleProxySetItemPointer(itproxy,
 								  RelationGetRelid(heapRel),
-								 *ht_ctid);
+								  BlockIdGetBlockNumber(&(ht_ctid->ip_blkid)),
+								  ht_ctid->ip_posid);
 
 	result = _bt_doinsert(rel, itproxy, checkUnique, heapRel);
 
