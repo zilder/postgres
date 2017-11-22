@@ -144,11 +144,11 @@ typedef struct IndexInfo
 	Oid		   *ii_UniqueProcs; /* array with one entry per column */
 	uint16	   *ii_UniqueStrats;	/* array with one entry per column */
 	bool		ii_Unique;
+	bool		ii_Global;
 	bool		ii_ReadyForInserts;
 	bool		ii_Concurrent;
 	bool		ii_BrokenHotChain;
 	void	   *ii_AmCache;
-	bool		ii_Global;
 	MemoryContext ii_Context;
 } IndexInfo;
 
