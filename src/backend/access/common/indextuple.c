@@ -800,6 +800,21 @@ index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 	}
 }
 
+void
+index_deform_tuple_proxy(IndexTupleProxy itp, TupleDesc tupleDescriptor,
+						 Datum *values, bool *isnull)
+{
+	int			i;
+
+	/* Assert to protect callers who allocate fixed-size arrays */
+	Assert(tupleDescriptor->natts <= INDEX_MAX_KEYS);
+
+	for (i = 0; i < tupleDescriptor->natts; i++)
+	{
+		values[i] = index_tuple_proxy_getattr(itp, i + 1, tupleDescriptor, &isnull[i]);
+	}
+}
+
 /*
  * Create a palloc'd copy of an index tuple.
  */
@@ -823,12 +838,12 @@ CopyIndexTupleProxy(IndexTupleProxy source)
 	Size	tuple_size;
 	Size	proxy_size;
 
-	proxy_size = MAXALIGN(sizeof(IndexTupleProxy));
+	proxy_size = MAXALIGN(sizeof(IndexTupleProxyData));
 	tuple_size = IndexTupleProxySize(source);
 
 	result = (IndexTupleProxy) palloc(proxy_size + tuple_size);
-	memcpy(result->tuple, source->tuple, tuple_size);
 	result->tuple_kind = source->tuple_kind;
 	result->tuple = (char *) result + proxy_size;
+	memcpy(result->tuple, source->tuple, tuple_size);
 	return result;
 }

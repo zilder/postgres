@@ -49,7 +49,7 @@ typedef struct
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
 
-static TransactionId _bt_check_unique(Relation rel, IndexTuple itup,
+static TransactionId _bt_check_unique(Relation rel, IndexTupleProxy itp,
 				 Relation heapRel, Buffer buf, OffsetNumber offset,
 				 ScanKey itup_scankey,
 				 IndexUniqueCheck checkUnique, bool *is_unique,
@@ -159,35 +159,41 @@ top:
 	 * let the tuple in and return false for possibly non-unique, or true for
 	 * definitely unique.
 	 */
-//	if (checkUnique != UNIQUE_CHECK_NO)
-//	{
-//		TransactionId xwait;
-//		uint32		speculativeToken;
-//
-//		offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
-//		xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
-//								 checkUnique, &is_unique, &speculativeToken);
-//
-//		if (TransactionIdIsValid(xwait))
-//		{
-//			/* Have to wait for the other guy ... */
-//			_bt_relbuf(rel, buf);
-//
-//			/*
-//			 * If it's a speculative insertion, wait for it to finish (ie. to
-//			 * go ahead with the insertion, or kill the tuple).  Otherwise
-//			 * wait for the transaction to finish as usual.
-//			 */
-//			if (speculativeToken)
-//				SpeculativeInsertionWait(xwait, speculativeToken);
-//			else
-//				XactLockTableWait(xwait, rel, &itup->t_tid, XLTW_InsertIndex);
-//
-//			/* start over... */
-//			_bt_freestack(stack);
-//			goto top;
-//		}
-//	}
+	if (checkUnique != UNIQUE_CHECK_NO)
+	{
+		TransactionId xwait;
+		uint32		speculativeToken;
+
+		offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
+		xwait = _bt_check_unique(rel, itp, heapRel, buf, offset, itup_scankey,
+								 checkUnique, &is_unique, &speculativeToken);
+
+		if (TransactionIdIsValid(xwait))
+		{
+			/* Have to wait for the other guy ... */
+			_bt_relbuf(rel, buf);
+
+			/*
+			 * If it's a speculative insertion, wait for it to finish (ie. to
+			 * go ahead with the insertion, or kill the tuple).  Otherwise
+			 * wait for the transaction to finish as usual.
+			 */
+			if (speculativeToken)
+				SpeculativeInsertionWait(xwait, speculativeToken);
+			else
+			{
+				/* TODO: add global index support */
+				Assert(itp->tuple_kind != EXTENDED_KIND);
+				XactLockTableWait(xwait, rel,
+								  &((IndexTuple) itp->tuple)->t_tid,
+								  XLTW_InsertIndex);
+			}
+
+			/* start over... */
+			_bt_freestack(stack);
+			goto top;
+		}
+	}
 
 	if (checkUnique != UNIQUE_CHECK_EXISTING)
 	{
@@ -237,7 +243,7 @@ top:
  * core code must redo the uniqueness check later.
  */
 static TransactionId
-_bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
+_bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 				 Buffer buf, OffsetNumber offset, ScanKey itup_scankey,
 				 IndexUniqueCheck checkUnique, bool *is_unique,
 				 uint32 *speculativeToken)
@@ -250,6 +256,8 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 	BTPageOpaque opaque;
 	Buffer		nbuf = InvalidBuffer;
 	bool		found = false;
+	/* TODO:  */
+	ItemPointer itp_tid = &((IndexTuple) itp->tuple)->t_tid;
 
 	/* Assume unique until we find a duplicate */
 	*is_unique = true;
@@ -307,7 +315,8 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 
 				/* okay, we gotta fetch the heap tuple ... */
 				curitup = (IndexTuple) PageGetItem(page, curitemid);
-				htid = curitup->t_tid;
+				/* TODO: Add support for ItemPointerExt */
+				htid = ((IndexTuple) curitup)->t_tid;
 
 				/*
 				 * If we are doing a recheck, we expect to find the tuple we
@@ -315,7 +324,8 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 				 * scanning.
 				 */
 				if (checkUnique == UNIQUE_CHECK_EXISTING &&
-					ItemPointerCompare(&htid, &itup->t_tid) == 0)
+					ItemPointerCompare(&htid, itp_tid) == 0)
+					// ItemPointerCompare(&htid, &itup->t_tid) == 0)
 				{
 					found = true;
 				}
@@ -378,7 +388,8 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 					 * not part of this chain because it had a different index
 					 * entry.
 					 */
-					htid = itup->t_tid;
+					// htid = itup->t_tid;
+					htid = *itp_tid;
 					if (heap_hot_search(&htid, heapRel, SnapshotSelf, NULL))
 					{
 						/* Normal case --- it's still live */
@@ -418,8 +429,8 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 						bool		isnull[INDEX_MAX_KEYS];
 						char	   *key_desc;
 
-						index_deform_tuple(itup, RelationGetDescr(rel),
-										   values, isnull);
+						index_deform_tuple_proxy(itp, RelationGetDescr(rel),
+												 values, isnull);
 
 						key_desc = BuildIndexValueDescription(rel, values,
 															  isnull);

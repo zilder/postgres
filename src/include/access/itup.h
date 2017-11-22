@@ -275,6 +275,9 @@ extern Datum nocache_index_getattr(IndexTuple tup, int attnum,
 					  TupleDesc tupleDesc);
 extern void index_deform_tuple(IndexTuple tup, TupleDesc tupleDescriptor,
 				   Datum *values, bool *isnull);
+extern void index_deform_tuple_proxy(IndexTupleProxy itp,
+						 TupleDesc tupleDescriptor, Datum *values,
+						 bool *isnull);
 extern IndexTuple CopyIndexTuple(IndexTuple source);
 extern IndexTupleProxy CopyIndexTupleProxy(IndexTupleProxy source);
 

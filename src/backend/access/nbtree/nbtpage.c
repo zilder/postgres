@@ -1206,12 +1206,16 @@ _bt_pagedel(Relation rel, Buffer buf)
 			{
 				ScanKey		itup_scankey;
 				ItemId		itemid;
-				IndexTuple	targetkey;
+				// IndexTuple	targetkey;
+				IndexTupleProxyData targetkey;
 				Buffer		lbuf;
 				BlockNumber leftsib;
 
 				itemid = PageGetItemId(page, P_HIKEY);
-				targetkey = CopyIndexTuple((IndexTuple) PageGetItem(page, itemid));
+				// targetkey = CopyIndexTuple((IndexTuple) PageGetItem(page, itemid));
+				targetkey.tuple_kind = REGULAR_KIND;
+				/* TODO: depending on kind */
+				targetkey.tuple = (Item) CopyIndexTuple((IndexTuple) PageGetItem(page, itemid));
 
 				leftsib = opaque->btpo_prev;
 
@@ -1254,7 +1258,7 @@ _bt_pagedel(Relation rel, Buffer buf)
 				}
 
 				/* we need an insertion scan key for the search, so build one */
-				itup_scankey = _bt_mkscankey(rel, targetkey);
+				itup_scankey = _bt_mkscankey(rel, &targetkey);
 				/* find the leftmost leaf page containing this key */
 				stack = _bt_search(rel, rel->rd_rel->relnatts, itup_scankey,
 								   false, &lbuf, BT_READ, NULL);
