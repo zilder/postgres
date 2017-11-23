@@ -2181,10 +2181,10 @@ describeOneTableDetails(const char *schemaname,
 									  PQgetvalue(result, i, 0));
 
 					/* If exclusion constraint, print the constraintdef */
-					if (strcmp(PQgetvalue(result, i, 7), "x") == 0)
+					if (strcmp(PQgetvalue(result, i, 8), "x") == 0)
 					{
 						appendPQExpBuffer(&buf, " %s",
-										  PQgetvalue(result, i, 6));
+										  PQgetvalue(result, i, 7));
 					}
 					else
 					{
@@ -2196,7 +2196,7 @@ describeOneTableDetails(const char *schemaname,
 							appendPQExpBufferStr(&buf, " PRIMARY KEY,");
 						else if (strcmp(PQgetvalue(result, i, 2), "t") == 0)
 						{
-							if (strcmp(PQgetvalue(result, i, 7), "u") == 0)
+							if (strcmp(PQgetvalue(result, i, 8), "u") == 0)
 								appendPQExpBufferStr(&buf, " UNIQUE CONSTRAINT,");
 							else
 								appendPQExpBufferStr(&buf, " UNIQUE,");
