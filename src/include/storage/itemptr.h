@@ -171,6 +171,12 @@ typedef ItemPointerExtData *ItemPointerExt;
 	(pointer)->ip_posid = InvalidOffsetNumber \
 )
 
+#define ItemPointerExtToItemPointer(pointerExt, pointer) \
+( \
+	(pointer)->ip_blkid = (pointerExt)->ip_blkid, \
+	(pointer)->ip_posid = (pointerExt)->ip_posid \
+)
+
 /* ----------------
  *		externs
  * ----------------

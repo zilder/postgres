@@ -266,6 +266,7 @@ typedef IndexTupleProxyData *IndexTupleProxy;
 extern IndexTuple index_form_tuple(TupleDesc tupleDescriptor,
 				 Datum *values, bool *isnull);
 IndexTupleProxy index_form_tuple_proxy(TupleDesc tupleDescriptor,
+				 uint16 tuple_kind,
 				 Datum *values,
 				 bool *isnull);
 extern Datum nocache_index_tuple_proxy_getattr(IndexTupleProxy itp,

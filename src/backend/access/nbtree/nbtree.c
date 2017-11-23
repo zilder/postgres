@@ -323,10 +323,12 @@ btinsert(Relation rel, Datum *values, bool *isnull,
 	bool		result;
 	// IndexTuple	itup;
 	IndexTupleProxy itproxy;
+	uint16		tuple_kind;
 
 	/* generate an index tuple */
 	// itup = index_form_tuple(RelationGetDescr(rel), values, isnull);
-	itproxy = index_form_tuple_proxy(RelationGetDescr(rel), values, isnull);
+	tuple_kind = indexInfo->ii_Global ? EXTENDED_KIND : REGULAR_KIND;
+	itproxy = index_form_tuple_proxy(RelationGetDescr(rel), tuple_kind, values, isnull);
 	// itproxy->t_tid = *ht_ctid;
 	IndexTupleProxySetItemPointer(itproxy,
 								  RelationGetRelid(heapRel),

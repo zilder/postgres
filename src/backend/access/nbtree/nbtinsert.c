@@ -182,11 +182,22 @@ top:
 				SpeculativeInsertionWait(xwait, speculativeToken);
 			else
 			{
-				/* TODO: add global index support */
-				Assert(itp->tuple_kind != EXTENDED_KIND);
-				XactLockTableWait(xwait, rel,
-								  &((IndexTuple) itp->tuple)->t_tid,
-								  XLTW_InsertIndex);
+				switch (itp->tuple_kind)
+				{
+					case REGULAR_KIND:
+						XactLockTableWait(xwait, rel,
+										  &((IndexTuple) itp->tuple)->t_tid,
+										  XLTW_InsertIndex);
+						break;
+					case EXTENDED_KIND:
+					{
+						ItemPointerData tid;
+
+						ItemPointerExtToItemPointer(&((IndexTupleExt) itp->tuple)->t_tid, &tid);
+						XactLockTableWait(xwait, rel, &tid, XLTW_InsertIndex);
+						break;
+					}
+				}
 			}
 
 			/* start over... */
@@ -256,8 +267,6 @@ _bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 	BTPageOpaque opaque;
 	Buffer		nbuf = InvalidBuffer;
 	bool		found = false;
-	/* TODO:  */
-	ItemPointer itp_tid = &((IndexTuple) itp->tuple)->t_tid;
 
 	/* Assume unique until we find a duplicate */
 	*is_unique = true;
@@ -274,7 +283,6 @@ _bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 	for (;;)
 	{
 		ItemId		curitemid;
-		IndexTuple	curitup;
 		BlockNumber nblkno;
 
 		/*
@@ -303,6 +311,8 @@ _bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 			{
 				ItemPointerData htid;
 				bool		all_dead;
+				ItemPointerData itp_tid;
+
 
 				/*
 				 * _bt_compare returns 0 for (1,NULL) and (1,NULL) - this's
@@ -313,29 +323,57 @@ _bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 				if (!_bt_isequal(itupdesc, page, offset, natts, itup_scankey))
 					break;		/* we're past all the equal tuples */
 
-				/* okay, we gotta fetch the heap tuple ... */
-				curitup = (IndexTuple) PageGetItem(page, curitemid);
-				/* TODO: Add support for ItemPointerExt */
-				htid = ((IndexTuple) curitup)->t_tid;
+				if (itp->tuple_kind == EXTENDED_KIND)
+				{
+					IndexTupleExt curitup = (IndexTupleExt) PageGetItem(page, curitemid);
+					ItemPointerExt itp_tidext = &((IndexTupleExt) itp->tuple)->t_tid;
+
+					ItemPointerExtToItemPointer(itp_tidext, &itp_tid);
+					ItemPointerExtToItemPointer(&curitup->t_tid, &htid);
+
+					if (checkUnique == UNIQUE_CHECK_EXISTING &&
+						(itp_tidext->ip_relid == curitup->t_tid.ip_relid) &&
+						ItemPointerCompare(&htid, &itp_tid) == 0)
+						// ItemPointerCompare(&htid, &itup->t_tid) == 0)
+					{
+						found = true;
+					}
+				}
+				else
+				{
+					IndexTuple	curitup;
+
+					/* okay, we gotta fetch the heap tuple ... */
+					curitup = (IndexTuple) PageGetItem(page, curitemid);
+					htid = ((IndexTuple) curitup)->t_tid;
+
+					if (checkUnique == UNIQUE_CHECK_EXISTING &&
+						ItemPointerCompare(&htid, &itp_tid) == 0)
+					{
+						found = true;
+					}
+				}
+
 
 				/*
 				 * If we are doing a recheck, we expect to find the tuple we
 				 * are rechecking.  It's not a duplicate, but we have to keep
 				 * scanning.
 				 */
-				if (checkUnique == UNIQUE_CHECK_EXISTING &&
-					ItemPointerCompare(&htid, itp_tid) == 0)
-					// ItemPointerCompare(&htid, &itup->t_tid) == 0)
-				{
-					found = true;
-				}
+				// if (checkUnique == UNIQUE_CHECK_EXISTING &&
+				// 	ItemPointerCompare(&htid, itp_tid) == 0)
+				// 	// ItemPointerCompare(&htid, &itup->t_tid) == 0)
+				// {
+				// 	found = true;
+				// }
 
 				/*
 				 * We check the whole HOT-chain to see if there is any tuple
 				 * that satisfies SnapshotDirty.  This is necessary because we
 				 * have just a single index entry for the entire chain.
 				 */
-				else if (heap_hot_search(&htid, heapRel, &SnapshotDirty,
+				// else 
+				if (!found && heap_hot_search(&htid, heapRel, &SnapshotDirty,
 										 &all_dead))
 				{
 					TransactionId xwait;
@@ -389,7 +427,12 @@ _bt_check_unique(Relation rel, IndexTupleProxy itp, Relation heapRel,
 					 * entry.
 					 */
 					// htid = itup->t_tid;
-					htid = *itp_tid;
+					// htid = *itp_tid;
+					if (itp->tuple_kind == EXTENDED_KIND)
+						ItemPointerExtToItemPointer(&((IndexTupleExt) itp->tuple)->t_tid, &htid);
+					else
+						htid = ((IndexTuple) itp->tuple)->t_tid;
+
 					if (heap_hot_search(&htid, heapRel, SnapshotSelf, NULL))
 					{
 						/* Normal case --- it's still live */
@@ -1003,7 +1046,6 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	BTPageOpaque sopaque = NULL;
 	Size		itemsz;
 	ItemId		itemid;
-	// IndexTuple	item;
 	IndexTupleProxyData item_obj;
 	IndexTupleProxy item = &item_obj;
 	OffsetNumber leftoff,
@@ -1079,12 +1121,12 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	{
 		itemid = PageGetItemId(origpage, P_HIKEY);
 		itemsz = ItemIdGetLength(itemid);
-		
-		/* TODO: determine tuple kind */
-		item->tuple_kind = REGULAR_KIND;
-		item->tuple = PageGetItem(origpage, itemid);
-		if (PageAddItem(rightpage, item->tuple, itemsz, rightoff,
-						false, false) == InvalidOffsetNumber)
+
+		// item->tuple_kind = newitem->tuple_kind;
+		// item->tuple = PageGetItem(origpage, itemid);
+		// if (PageAddItem(rightpage, item->tuple, itemsz, rightoff,
+		if (PageAddItem(rightpage, PageGetItem(origpage, itemid), itemsz,
+						rightoff, false, false) == InvalidOffsetNumber)
 		{
 			memset(rightpage, 0, BufferGetPageSize(rbuf));
 			elog(ERROR, "failed to add hikey to the right sibling"
@@ -1111,8 +1153,7 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 		/* existing item at firstright will become first on right page */
 		itemid = PageGetItemId(origpage, firstright);
 		itemsz = ItemIdGetLength(itemid);
-		/* TODO: determine tuple kind */
-		item->tuple_kind = REGULAR_KIND;
+		item->tuple_kind = newitem->tuple_kind;
 		item->tuple = PageGetItem(origpage, itemid);
 	}
 	if (PageAddItem(leftpage, item->tuple, itemsz, leftoff,
@@ -1137,8 +1178,7 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 	{
 		itemid = PageGetItemId(origpage, i);
 		itemsz = ItemIdGetLength(itemid);
-		/* TODO: determine tuple kind */
-		item->tuple_kind = REGULAR_KIND;
+		item->tuple_kind = newitem->tuple_kind;
 		item->tuple = PageGetItem(origpage, itemid);
 
 		/* does new item belong before this one? */
@@ -1344,9 +1384,8 @@ _bt_split(Relation rel, Buffer buf, Buffer cbuf, OffsetNumber firstright,
 			 * if XLogInsert decides it needs a full-page image of the left
 			 * page.
 			 */
-			/* TODO: determine size based on tuple kind */
 			itemid = PageGetItemId(origpage, P_HIKEY);
-			item->tuple_kind = REGULAR_KIND;
+			item->tuple_kind = newitem->tuple_kind;
 			item->tuple = PageGetItem(origpage, itemid);
 			XLogRegisterBufData(0, (char *) item, MAXALIGN(IndexTupleProxySize(item)));
 		}
@@ -1728,6 +1767,7 @@ _bt_insert_parent(Relation rel,
 		}
 
 		/* get high key from left page == lowest key on new right page */
+		/* TODO */
 		ritem.tuple_kind = REGULAR_KIND;
 		ritem.tuple = PageGetItem(page, PageGetItemId(page, P_HIKEY));
 

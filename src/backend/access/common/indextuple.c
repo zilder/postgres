@@ -187,6 +187,7 @@ index_form_tuple(TupleDesc tupleDescriptor,
 
 IndexTupleProxy
 index_form_tuple_proxy(TupleDesc tupleDescriptor,
+				 uint16 tuple_kind,
 				 Datum *values,
 				 bool *isnull)
 {
@@ -271,7 +272,7 @@ index_form_tuple_proxy(TupleDesc tupleDescriptor,
 	if (hasnull)
 		infomask |= INDEX_NULL_MASK;
 
-	hoff = IndexInfoFindDataOffsetByKind(infomask, REGULAR_KIND);
+	hoff = IndexInfoFindDataOffsetByKind(infomask, tuple_kind);
 #ifdef TOAST_INDEX_HACK
 	data_size = heap_compute_data_size(tupleDescriptor,
 									   untoasted_values, isnull);
@@ -286,7 +287,7 @@ index_form_tuple_proxy(TupleDesc tupleDescriptor,
 	proxy = (IndexTupleProxy) palloc0(proxy_size + size);
 	tp = (char *) proxy + proxy_size;
 	// proxy = (IndexTupleProxy) palloc(sizeof(IndexTupleProxy));
-	proxy->tuple_kind = REGULAR_KIND;
+	proxy->tuple_kind = tuple_kind;
 	proxy->tuple = (Pointer) tp;
 	// tuple = (IndexTuple) tp;
 
