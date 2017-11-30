@@ -150,11 +150,13 @@ typedef struct BTMetaPageData
  *	as unique identifier for a given index tuple (logical position
  *	within a level). - vadim 04/09/97
  */
-#define BTTidSame(i1, i2)	\
-	((ItemPointerGetBlockNumber(&(i1)) == ItemPointerGetBlockNumber(&(i2))) && \
-	 (ItemPointerGetOffsetNumber(&(i1)) == ItemPointerGetOffsetNumber(&(i2))))
-#define BTEntrySame(i1, i2) \
-	BTTidSame((i1)->t_tid, (i2)->t_tid)
+/*
+// #define BTTidSame(i1, i2)	\
+// 	((ItemPointerGetBlockNumber(&(i1)) == ItemPointerGetBlockNumber(&(i2))) && \
+// 	 (ItemPointerGetOffsetNumber(&(i1)) == ItemPointerGetOffsetNumber(&(i2))))
+// #define BTEntrySame(i1, i2) \
+// 	BTTidSame((i1)->t_tid, (i2)->t_tid)
+*/
 
 
 /*
@@ -248,15 +250,61 @@ typedef struct BTMetaPageData
  *	Again, see the paper for details.
  */
 
+/*
+// typedef struct BTStackData
+// {
+// 	BlockNumber bts_blkno;
+// 	OffsetNumber bts_offset;
+// 	IndexTupleData bts_btentry;
+// 	struct BTStackData *bts_parent;
+// } BTStackData;
+*/
+
 typedef struct BTStackData
 {
 	BlockNumber bts_blkno;
 	OffsetNumber bts_offset;
-	IndexTupleData bts_btentry;
+	bool bts_extended;
+	union
+	{
+		IndexTupleData tuple;
+		IndexTupleExtData tuple_ext;
+	} bts_btentry;
+	// IndexTupleProxyData bts_btentry;
 	struct BTStackData *bts_parent;
 } BTStackData;
 
 typedef BTStackData *BTStack;
+
+#define BTTidSame(i1, i2)	\
+	((ItemPointerGetBlockNumber(&(i1)) == ItemPointerGetBlockNumber(&(i2))) && \
+	 (ItemPointerGetOffsetNumber(&(i1)) == ItemPointerGetOffsetNumber(&(i2))))
+#define BTTidExtSame(i1, i2)	\
+	((ItemPointerGetRelid(&(i1)) == ItemPointerGetRelid(&(i2))) && \
+	 (ItemPointerGetBlockNumber(&(i1)) == ItemPointerGetBlockNumber(&(i2))) && \
+	 (ItemPointerGetOffsetNumber(&(i1)) == ItemPointerGetOffsetNumber(&(i2))))
+
+/*
+// #define BTStackEntrySame(stack, item) \
+// 	( \
+// 		((stack)->bts_btentry.tuple_kind == REGULAR_KIND && \
+// 		 BTTidSame(((IndexTuple) (stack)->bts_btentry.tuple)->t_tid, \
+// 		 			((IndexTuple) (item))->t_tid)) || \
+// 		((stack)->bts_btentry.tuple_kind == EXTENDED_KIND && \
+// 		 BTTidExtSame(((IndexTupleExt) (stack)->bts_btentry.tuple)->t_tid, \
+// 		 			  ((IndexTupleExt) (item))->t_tid)) \
+// 	)
+*/
+
+#define BTStackEntrySame(stack, item) \
+	( \
+		(!(stack)->bts_extended && \
+		 BTTidSame((stack)->bts_btentry.tuple.t_tid, \
+		 			((IndexTuple) (item))->t_tid)) || \
+		((stack)->bts_extended && \
+		 BTTidExtSame((stack)->bts_btentry.tuple_ext.t_tid, \
+		 			  ((IndexTupleExt) (item))->t_tid)) \
+	)
 
 /*
  * BTScanOpaqueData is the btree-private state needed for an indexscan.
@@ -498,7 +546,7 @@ extern int	_bt_pagedel(Relation rel, Buffer buf);
  */
 extern BTStack _bt_search(Relation rel,
 		   int keysz, ScanKey scankey, bool nextkey,
-		   Buffer *bufP, int access, Snapshot snapshot);
+		   Buffer *bufP, int access, Snapshot snapshot, bool extended);
 extern Buffer _bt_moveright(Relation rel, Buffer buf, int keysz,
 			  ScanKey scankey, bool nextkey, bool forupdate, BTStack stack,
 			  int access, Snapshot snapshot);
@@ -556,4 +604,5 @@ extern void _bt_spool(BTSpool *btspool, ItemPointer self,
 		  Datum *values, bool *isnull);
 extern void _bt_leafbuild(BTSpool *btspool, BTSpool *spool2);
 
+extern bool is_index_extended(Relation index);
 #endif							/* NBTREE_H */

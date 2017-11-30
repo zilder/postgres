@@ -985,7 +985,13 @@ _bt_lock_branch_parent(Relation rel, BlockNumber child, BTStack stack,
 	 * Locate the downlink of "child" in the parent (updating the stack entry
 	 * if needed)
 	 */
-	ItemPointerSet(&(stack->bts_btentry.t_tid), child, P_HIKEY);
+	// ItemPointerSet(&(stack->bts_btentry.t_tid), child, P_HIKEY);
+	/* TODO: set relid instead of InvalidOid */
+	if (stack->bts_extended)
+		ItemPointerExtSet(&stack->bts_btentry.tuple_ext.t_tid, InvalidOid, child, P_HIKEY);
+	else
+		ItemPointerSet(&stack->bts_btentry.tuple.t_tid, child, P_HIKEY);
+	// IndexTupleProxySetItemPointer(&stack->bts_btentry, InvalidOid, child, P_HIKEY);
 	pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
 	if (pbuf == InvalidBuffer)
 		elog(ERROR, "failed to re-find parent key in index \"%s\" for deletion target page %u",
@@ -1260,8 +1266,11 @@ _bt_pagedel(Relation rel, Buffer buf)
 				/* we need an insertion scan key for the search, so build one */
 				itup_scankey = _bt_mkscankey(rel, &targetkey);
 				/* find the leftmost leaf page containing this key */
+				/* TODO: determine if it is extended */
 				stack = _bt_search(rel, rel->rd_rel->relnatts, itup_scankey,
-								   false, &lbuf, BT_READ, NULL);
+								   false, &lbuf, BT_READ, NULL, false);
+				// stack = _bt_search(rel, rel->rd_rel->relnatts, itup_scankey,
+				// 				   false, &lbuf, BT_READ, NULL);
 				/* don't need a pin on the page */
 				_bt_relbuf(rel, lbuf);
 

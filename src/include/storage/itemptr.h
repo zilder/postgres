@@ -79,6 +79,15 @@ typedef ItemPointerExtData *ItemPointerExt;
 
 /*
  * ItemPointerGetBlockNumberNoCheck
+ *		Returns the relid of an extended item pointer.
+ */
+#define ItemPointerGetRelid(pointer) \
+( \
+	(pointer)->ip_relid \
+)
+
+/*
+ * ItemPointerGetBlockNumberNoCheck
  *		Returns the block number of a disk item pointer.
  */
 #define ItemPointerGetBlockNumberNoCheck(pointer) \
@@ -122,6 +131,18 @@ typedef ItemPointerExtData *ItemPointerExt;
 #define ItemPointerSet(pointer, blockNumber, offNum) \
 ( \
 	AssertMacro(PointerIsValid(pointer)), \
+	BlockIdSet(&((pointer)->ip_blkid), blockNumber), \
+	(pointer)->ip_posid = offNum \
+)
+
+/*
+ * ItemPointerExtSet
+ *		Sets a disk item pointer to the specified relid, block and offset.
+ */
+#define ItemPointerExtSet(pointer, relid, blockNumber, offNum) \
+( \
+	AssertMacro(PointerIsValid(pointer)), \
+	(pointer)->ip_relid = relid, \
 	BlockIdSet(&((pointer)->ip_blkid), blockNumber), \
 	(pointer)->ip_posid = offNum \
 )

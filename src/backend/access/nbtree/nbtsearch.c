@@ -95,7 +95,7 @@ _bt_drop_lock_and_maybe_pin(IndexScanDesc scan, BTScanPos sp)
  */
 BTStack
 _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
-		   Buffer *bufP, int access, Snapshot snapshot)
+		   Buffer *bufP, int access, Snapshot snapshot, bool extended)
 {
 	BTStack		stack_in = NULL;
 
@@ -113,7 +113,11 @@ _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		BTPageOpaque opaque;
 		OffsetNumber offnum;
 		ItemId		itemid;
-		IndexTuple	itup;
+		// IndexTuple	itup;
+		Item		item;
+		Size		item_sz;
+		// Item		itup;
+		// Size		itup_sz;
 		BlockNumber blkno;
 		BlockNumber par_blkno;
 		BTStack		new_stack;
@@ -146,8 +150,23 @@ _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		 */
 		offnum = _bt_binsrch(rel, *bufP, keysz, scankey, nextkey);
 		itemid = PageGetItemId(page, offnum);
-		itup = (IndexTuple) PageGetItem(page, itemid);
-		blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+		// itup = (IndexTuple) PageGetItem(page, itemid);
+		item = PageGetItem(page, itemid);
+		if (extended)
+		{
+			IndexTupleExt itup = (IndexTupleExt) item;
+
+			blkno = ItemPointerGetBlockNumber(((ItemPointerExt) &(itup->t_tid)));
+			item_sz = sizeof(IndexTupleExtData);
+		}
+		else
+		{
+			IndexTuple itup = (IndexTuple) item;
+
+			blkno = ItemPointerGetBlockNumber(((ItemPointer) &(itup->t_tid)));
+			item_sz = sizeof(IndexTupleData);
+		}
+		// blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
 		par_blkno = BufferGetBlockNumber(*bufP);
 
 		/*
@@ -163,7 +182,9 @@ _bt_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		new_stack = (BTStack) palloc(sizeof(BTStackData));
 		new_stack->bts_blkno = par_blkno;
 		new_stack->bts_offset = offnum;
-		memcpy(&new_stack->bts_btentry, itup, sizeof(IndexTupleData));
+		new_stack->bts_extended = extended;
+		memcpy(&new_stack->bts_btentry.tuple, item, item_sz);
+		// memcpy(&new_stack->bts_btentry, itup, sizeof(IndexTupleData));
 		new_stack->bts_parent = stack_in;
 
 		/* drop the read lock on the parent page, acquire one on the child */
@@ -552,6 +573,7 @@ _bt_first(IndexScanDesc scan, ScanDirection dir)
 	StrategyNumber strat_total;
 	BTScanPosItem *currItem;
 	BlockNumber blkno;
+	bool		extended;
 
 	Assert(!BTScanPosIsValid(so->currPos));
 
@@ -1025,8 +1047,12 @@ _bt_first(IndexScanDesc scan, ScanDirection dir)
 	 * Use the manufactured insertion scan key to descend the tree and
 	 * position ourselves on the target leaf page.
 	 */
+
+	/* TODO: probably this should be passed with arguments */
+	extended = is_index_extended(rel);
+
 	stack = _bt_search(rel, keysCount, scankeys, nextkey, &buf, BT_READ,
-					   scan->xs_snapshot);
+					   scan->xs_snapshot, extended);
 
 	/* don't need to keep the stack around... */
 	_bt_freestack(stack);

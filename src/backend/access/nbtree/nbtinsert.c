@@ -25,6 +25,9 @@
 #include "storage/predicate.h"
 #include "utils/tqual.h"
 
+#include "utils/syscache.h"
+#include "access/htup_details.h"
+
 
 typedef struct
 {
@@ -120,7 +123,8 @@ _bt_doinsert(Relation rel, IndexTupleProxy itp,
 
 top:
 	/* find the first page containing this key */
-	stack = _bt_search(rel, natts, itup_scankey, false, &buf, BT_WRITE, NULL);
+	stack = _bt_search(rel, natts, itup_scankey, false, &buf, BT_WRITE, NULL,
+					   itp->tuple_kind == EXTENDED_KIND);
 
 	offset = InvalidOffsetNumber;
 
@@ -1768,7 +1772,7 @@ _bt_insert_parent(Relation rel,
 
 		/* get high key from left page == lowest key on new right page */
 		/* TODO */
-		ritem.tuple_kind = REGULAR_KIND;
+		ritem.tuple_kind = is_index_extended(rel) ? EXTENDED_KIND : REGULAR_KIND;
 		ritem.tuple = PageGetItem(page, PageGetItemId(page, P_HIKEY));
 
 		/* form an index tuple that points at the new right page */
@@ -1784,7 +1788,15 @@ _bt_insert_parent(Relation rel,
 		 * want to find parent pointing to where we are, right ?	- vadim
 		 * 05/27/97
 		 */
-		ItemPointerSet(&(stack->bts_btentry.t_tid), bknum, P_HIKEY);
+		// ItemPointerSet(&(stack->bts_btentry.t_tid), bknum, P_HIKEY);
+		/* TODO: Set relid instead of InvalidOid */
+		stack->bts_extended = (ritem.tuple_kind == EXTENDED_KIND);
+		if (stack->bts_extended)
+			ItemPointerExtSet(&stack->bts_btentry.tuple_ext.t_tid, InvalidOid, bknum, P_HIKEY);
+		else
+			ItemPointerSet(&stack->bts_btentry.tuple.t_tid, bknum, P_HIKEY);
+		// stack->bts_btentry.tuple_kind = ritem.tuple_kind;
+		// IndexTupleProxySetItemPointer(&stack->bts_btentry, InvalidOid, bknum, P_HIKEY);
 		pbuf = _bt_getstackbuf(rel, stack, BT_WRITE);
 
 		/*
@@ -1806,6 +1818,22 @@ _bt_insert_parent(Relation rel,
 		/* be tidy */
 		pfree(new_item);
 	}
+}
+
+bool
+is_index_extended(Relation index)
+{
+	Oid				indexoid = RelationGetRelid(index);
+	HeapTuple		indexTuple;
+	bool			result;
+
+	indexTuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexoid));
+	if (!HeapTupleIsValid(indexTuple))	/* should not happen */
+		elog(ERROR, "cache lookup failed for index %u", indexoid);
+	result = ((Form_pg_index) GETSTRUCT(indexTuple))->indisglobal;
+	ReleaseSysCache(indexTuple);
+
+	return result;
 }
 
 /*
@@ -1908,7 +1936,8 @@ _bt_getstackbuf(Relation rel, BTStack stack, int access)
 						minoff,
 						maxoff;
 			ItemId		itemid;
-			IndexTuple	item;
+			// IndexTuple	item;
+			Item		item;
 
 			minoff = P_FIRSTDATAKEY(opaque);
 			maxoff = PageGetMaxOffsetNumber(page);
@@ -1938,8 +1967,9 @@ _bt_getstackbuf(Relation rel, BTStack stack, int access)
 				 offnum = OffsetNumberNext(offnum))
 			{
 				itemid = PageGetItemId(page, offnum);
-				item = (IndexTuple) PageGetItem(page, itemid);
-				if (BTEntrySame(item, &stack->bts_btentry))
+				item = PageGetItem(page, itemid);
+				// if (BTEntrySame(item, &stack->bts_btentry))
+				if (BTStackEntrySame(stack, item))
 				{
 					/* Return accurate pointer to where link is now */
 					stack->bts_blkno = blkno;
@@ -1953,8 +1983,9 @@ _bt_getstackbuf(Relation rel, BTStack stack, int access)
 				 offnum = OffsetNumberPrev(offnum))
 			{
 				itemid = PageGetItemId(page, offnum);
-				item = (IndexTuple) PageGetItem(page, itemid);
-				if (BTEntrySame(item, &stack->bts_btentry))
+				item = PageGetItem(page, itemid);
+				// if (BTEntrySame(item, &stack->bts_btentry))
+				if (BTStackEntrySame(stack, item))
 				{
 					/* Return accurate pointer to where link is now */
 					stack->bts_blkno = blkno;
@@ -2008,14 +2039,17 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	BTPageOpaque rootopaque;
 	BTPageOpaque lopaque;
 	ItemId		itemid;
-	IndexTuple	item;
-	IndexTuple	left_item;
+	IndexTupleProxyData	item;
+	// IndexTuple	left_item;
+	IndexTupleProxyData left_item;
 	Size		left_item_sz;
-	IndexTuple	right_item;
+	IndexTupleProxy	right_item;
 	Size		right_item_sz;
 	Buffer		metabuf;
 	Page		metapg;
 	BTMetaPageData *metad;
+	bool		extended;
+	uint16		tuple_kind;
 
 	lbkno = BufferGetBlockNumber(lbuf);
 	rbkno = BufferGetBlockNumber(rbuf);
@@ -2032,25 +2066,38 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	metapg = BufferGetPage(metabuf);
 	metad = BTPageGetMeta(metapg);
 
+	extended = is_index_extended(rel);
+
 	/*
 	 * Create downlink item for left page (old root).  Since this will be the
 	 * first item in a non-leaf page, it implicitly has minus-infinity key
 	 * value, so we need not store any actual key in it.
 	 */
-	left_item_sz = sizeof(IndexTupleData);
-	left_item = (IndexTuple) palloc(left_item_sz);
-	left_item->t_info = left_item_sz;
-	ItemPointerSet(&(left_item->t_tid), lbkno, P_HIKEY);
+	tuple_kind = extended ? EXTENDED_KIND : REGULAR_KIND;
+	left_item_sz = extended ? sizeof(IndexTupleExtData) : sizeof(IndexTupleData);
+	left_item.tuple_kind = tuple_kind;
+	left_item.tuple = (Item) palloc(left_item_sz);
+	IndexTupleProxySetInfoMask(&left_item, left_item_sz);
+	IndexTupleProxySetItemPointer(&left_item, RelationGetRelid(rel), lbkno,
+								  P_HIKEY);
+
+	// left_item_sz = sizeof(IndexTupleData);
+	// left_item = (IndexTuple) palloc(left_item_sz);
+	// left_item->t_info = left_item_sz;
+	// ItemPointerSet(&(left_item->t_tid), lbkno, P_HIKEY);
 
 	/*
 	 * Create downlink item for right page.  The key for it is obtained from
 	 * the "high key" position in the left page.
 	 */
 	itemid = PageGetItemId(lpage, P_HIKEY);
+	item.tuple_kind = tuple_kind;
+	item.tuple = PageGetItem(lpage, itemid);
 	right_item_sz = ItemIdGetLength(itemid);
-	item = (IndexTuple) PageGetItem(lpage, itemid);
-	right_item = CopyIndexTuple(item);
-	ItemPointerSet(&(right_item->t_tid), rbkno, P_HIKEY);
+	right_item = CopyIndexTupleProxy(&item);
+	IndexTupleProxySetItemPointer(right_item, RelationGetRelid(rel), rbkno,
+								  P_HIKEY);
+	// ItemPointerSet(&(right_item->t_tid), rbkno, P_HIKEY);
 
 	/* NO EREPORT(ERROR) from here till newroot op is logged */
 	START_CRIT_SECTION();
@@ -2077,7 +2124,7 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	 * Note: we *must* insert the two items in item-number order, for the
 	 * benefit of _bt_restore_page().
 	 */
-	if (PageAddItem(rootpage, (Item) left_item, left_item_sz, P_HIKEY,
+	if (PageAddItem(rootpage, left_item.tuple, left_item_sz, P_HIKEY,
 					false, false) == InvalidOffsetNumber)
 		elog(PANIC, "failed to add leftkey to new root page"
 			 " while splitting block %u of index \"%s\"",
@@ -2086,7 +2133,7 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	/*
 	 * insert the right page pointer into the new root page.
 	 */
-	if (PageAddItem(rootpage, (Item) right_item, right_item_sz, P_FIRSTKEY,
+	if (PageAddItem(rootpage, right_item->tuple, right_item_sz, P_FIRSTKEY,
 					false, false) == InvalidOffsetNumber)
 		elog(PANIC, "failed to add rightkey to new root page"
 			 " while splitting block %u of index \"%s\"",
@@ -2145,7 +2192,7 @@ _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf)
 	/* done with metapage */
 	_bt_relbuf(rel, metabuf);
 
-	pfree(left_item);
+	pfree(left_item.tuple);
 	pfree(right_item);
 
 	return rootbuf;
