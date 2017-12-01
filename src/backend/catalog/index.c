@@ -286,6 +286,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	TupleDesc	indexTupDesc;
 	int			natts;			/* #atts in heap rel --- for error checks */
 	int			i;
+	Form_pg_attribute to;
 
 	/* We need access to the index AM's API struct */
 	amroutine = GetIndexAmRoutineByAmId(accessMethodObjectId, false);
@@ -297,7 +298,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	/*
 	 * allocate the new tuple descriptor
 	 */
-	indexTupDesc = CreateTemplateTupleDesc(numatts, false);
+	indexTupDesc = CreateTemplateTupleDesc(indexInfo->ii_Global ? numatts + 1 : numatts, false);
 
 	/*
 	 * For simple index columns, we copy the pg_attribute row from the parent
@@ -307,11 +308,13 @@ ConstructTupleDescriptor(Relation heapRelation,
 	for (i = 0; i < numatts; i++)
 	{
 		AttrNumber	atnum = indexInfo->ii_KeyAttrNumbers[i];
-		Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
+		// Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
 		HeapTuple	tuple;
 		Form_pg_type typeTup;
 		Form_pg_opclass opclassTup;
 		Oid			keyType;
+
+		to = TupleDescAttr(indexTupDesc, i);
 
 		if (atnum != 0)
 		{
@@ -476,6 +479,35 @@ ConstructTupleDescriptor(Relation heapRelation,
 		}
 	}
 
+	/* Add relid attribute for global index */
+	if (indexInfo->ii_Global)
+	{
+		HeapTuple	tuple;
+		Form_pg_type typeTup;
+
+		to = TupleDescAttr(indexTupDesc, i);
+		MemSet(to, 0, ATTRIBUTE_FIXED_PART_SIZE);
+
+		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(OIDOID));
+		Assert(HeapTupleIsValid(tuple));
+		typeTup = (Form_pg_type) GETSTRUCT(tuple);
+
+		to->attnum = i + 1;
+		to->atttypid = OIDOID;
+		to->attlen = typeTup->typlen;
+		to->attbyval = typeTup->typbyval;
+		to->attstorage = typeTup->typstorage;
+		to->attalign = typeTup->typalign;
+		to->attstattarget = -1;
+		to->attcacheoff = -1;
+		to->atttypmod = typeTup->typtypmod;
+		to->attislocal = true;
+		to->attcollation = InvalidOid;
+		namestrcpy(&to->attname, "relid");
+
+		ReleaseSysCache(tuple);
+	}
+
 	pfree(amroutine);
 
 	return indexTupDesc;
@@ -571,17 +603,41 @@ UpdateIndexRelation(Oid indexoid,
 	Relation	pg_index;
 	HeapTuple	tuple;
 	int			i;
+	int			numatts = indexInfo->ii_NumIndexAttrs;
+	int			extra_atts = indexInfo->ii_Global ? 1 : 0;
 
 	/*
 	 * Copy the index key, opclass, and indoption info into arrays (should we
 	 * make the caller pass them like this to start with?)
 	 */
-	indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
-	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
+	// for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// 	indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
+	// indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
+	// indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
+	// indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+
+	indkey = buildint2vector(NULL, numatts + extra_atts);
+	for (i = 0; i < numatts; i++)
 		indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
-	indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
-	indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
-	indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+
+	indcollation = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indcollation->values, collationOids, numatts * sizeof(Oid));
+
+	indclass = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indclass->values, classOids, numatts * sizeof(Oid));
+
+	indoption = buildint2vector(NULL, numatts + extra_atts);
+	memcpy(indoption->values, coloptions, numatts * sizeof(int16));
+
+	if (extra_atts)
+	{
+		/* TODO */
+		indkey->values[numatts] = 0;
+		indcollation->values[numatts] = 0;
+		indoption->values[numatts] = 0;
+		indclass->values[numatts] = OID_BTREE_OPS_OID;
+	}
 
 	/*
 	 * Convert the index expressions (if any) to a text datum
@@ -906,13 +962,13 @@ index_create(Relation heapRelation,
 	 * index relation's tuple descriptor
 	 */
 	InitializeAttributeOids(indexRelation,
-							indexInfo->ii_NumIndexAttrs,
+							indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0),
 							indexRelationId);
 
 	/*
 	 * append ATTRIBUTE tuples for the index
 	 */
-	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs);
+	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0));
 
 	/* ----------------
 	 *	  update pg_index

@@ -1557,7 +1557,7 @@ RelationInitIndexAccessInfo(Relation relation)
 	ReleaseSysCache(tuple);
 
 	natts = relation->rd_rel->relnatts;
-	if (natts != relation->rd_index->indnatts)
+	if (natts != relation->rd_index->indnatts + (relation->rd_index->indisglobal ? 1 : 0))
 		elog(ERROR, "relnatts disagrees with indnatts for index %u",
 			 RelationGetRelid(relation));
 
