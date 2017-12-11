@@ -72,6 +72,8 @@
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
 
+#include "catalog/pg_inherits_fn.h"
+
 
 /* Potentially set by pg_upgrade_support functions */
 Oid			binary_upgrade_next_index_pg_class_oid = InvalidOid;
@@ -107,7 +109,7 @@ static void UpdateIndexRelation(Oid indexoid, Oid heapoid,
 					bool immediate,
 					bool isvalid);
 static void index_update_stats(Relation rel,
-				   bool hasindex, bool isprimary,
+				   bool hasindex, bool isprimary, bool isglobal,
 				   double reltuples);
 static void IndexCheckExclusion(Relation heapRelation,
 					Relation indexRelation,
@@ -1162,6 +1164,7 @@ index_create(Relation heapRelation,
 		index_update_stats(heapRelation,
 						   true,
 						   isprimary,
+						   indexInfo->ii_Global,
 						   -1.0);
 		/* Make the above update visible */
 		CommandCounterIncrement();
@@ -1344,6 +1347,7 @@ index_constraint_create(Relation heapRelation,
 		index_update_stats(heapRelation,
 						   true,
 						   true,
+						   indexInfo->ii_Global,
 						   -1.0);
 
 	/*
@@ -1910,6 +1914,7 @@ static void
 index_update_stats(Relation rel,
 				   bool hasindex,
 				   bool isprimary,
+				   bool isglobal,
 				   double reltuples)
 {
 	Oid			relid = RelationGetRelid(rel);
@@ -1999,7 +2004,6 @@ index_update_stats(Relation rel,
 
 	if (reltuples >= 0)
 	{
-		BlockNumber relpages = RelationGetNumberOfBlocks(rel);
 		BlockNumber relallvisible;
 
 		if (rd_rel->relkind != RELKIND_INDEX)
@@ -2007,10 +2011,15 @@ index_update_stats(Relation rel,
 		else					/* don't bother for indexes */
 			relallvisible = 0;
 
-		if (rd_rel->relpages != (int32) relpages)
+		if (!isglobal)
 		{
-			rd_rel->relpages = (int32) relpages;
-			dirty = true;
+			BlockNumber relpages = RelationGetNumberOfBlocks(rel);
+
+			if (rd_rel->relpages != (int32) relpages)
+			{
+				rd_rel->relpages = (int32) relpages;
+				dirty = true;
+			}
 		}
 		if (rd_rel->reltuples != (float4) reltuples)
 		{
@@ -2179,15 +2188,47 @@ index_build(Relation heapRelation,
 	/*
 	 * Update heap and index pg_class rows
 	 */
+	// if (!indexInfo->ii_Global)
+	// {
+	// 	index_update_stats(heapRelation,
+	// 					   true,
+	// 					   isprimary,
+	// 					   stats->heap_tuples);
+	// }
+	// else
+	// {
+	// 	List *children;
+	// 	ListCell *lc;
+
+	// 	children = find_inheritance_children(RelationGetRelid(heapRelation),
+	// 										 AccessShareLock);
+	// 	foreach (lc, children)
+	// 	{
+	// 		Oid childRelid = lfirst_oid(lc);
+	// 		Relation childRel;
+
+	// 		childRel = heap_open(childRelid, AccessShareLock);
+	// 		/* TODO: Collect separate heap_tuples for each child */
+	// 		index_update_stats(childRel,
+	// 					   true,
+	// 					   isprimary,
+	// 					   stats->heap_tuples);
+	// 		heap_close(childRel, AccessShareLock);
+	// 	}
+	// }
+
 	index_update_stats(heapRelation,
 					   true,
 					   isprimary,
+					   indexInfo->ii_Global,
 					   stats->heap_tuples);
 
 	index_update_stats(indexRelation,
-					   false,
-					   false,
-					   stats->index_tuples);
+				   false,
+				   false,
+				   false,
+				   stats->index_tuples);
+
 
 	/* Make the updated catalog row versions visible */
 	CommandCounterIncrement();
@@ -2240,11 +2281,39 @@ IndexBuildHeapScan(Relation heapRelation,
 				   IndexBuildCallback callback,
 				   void *callback_state)
 {
-	return IndexBuildHeapRangeScan(heapRelation, indexRelation,
-								   indexInfo, allow_sync,
-								   false,
-								   0, InvalidBlockNumber,
-								   callback, callback_state);
+	double reltuples = 0;
+
+	if (!indexInfo->ii_Global)
+	{
+		reltuples = IndexBuildHeapRangeScan(heapRelation, indexRelation,
+											indexInfo, allow_sync,
+											false,
+											0, InvalidBlockNumber,
+											callback, callback_state);
+	}
+	else
+	{
+		List *children;
+		ListCell *lc;
+
+		/* TODO: Make it recursive */
+		children = find_inheritance_children(RelationGetRelid(heapRelation), AccessShareLock);
+
+		foreach (lc, children)
+		{
+			Oid childRelid = lfirst_oid(lc);
+			Relation childRel = heap_open(childRelid, AccessShareLock);
+
+			reltuples += IndexBuildHeapRangeScan(childRel, indexRelation,
+												 indexInfo, allow_sync,
+												 false,
+												 0, InvalidBlockNumber,
+												 callback, callback_state);
+			heap_close(childRel, AccessShareLock);
+		}
+	}
+
+	return reltuples;
 }
 
 /*

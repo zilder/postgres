@@ -382,6 +382,7 @@ DefineIndex(Oid relationId,
 	{
 		case RELKIND_RELATION:
 		case RELKIND_MATVIEW:
+		case RELKIND_PARTITIONED_TABLE:
 			/* OK */
 			break;
 		case RELKIND_FOREIGN_TABLE:
@@ -389,11 +390,11 @@ DefineIndex(Oid relationId,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
 					 errmsg("cannot create index on foreign table \"%s\"",
 							RelationGetRelationName(rel))));
-		case RELKIND_PARTITIONED_TABLE:
-			ereport(ERROR,
-					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
-					 errmsg("cannot create index on partitioned table \"%s\"",
-							RelationGetRelationName(rel))));
+		// case RELKIND_PARTITIONED_TABLE:
+		// 	ereport(ERROR,
+		// 			(errcode(ERRCODE_WRONG_OBJECT_TYPE),
+		// 			 errmsg("cannot create index on partitioned table \"%s\"",
+		// 					RelationGetRelationName(rel))));
 		default:
 			ereport(ERROR,
 					(errcode(ERRCODE_WRONG_OBJECT_TYPE),
