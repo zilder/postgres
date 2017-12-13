@@ -82,6 +82,8 @@
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
 
+#include "utils/memutils.h"
+
 
 /* ----------------------------------------------------------------
  *					macros used in index_ routines
@@ -126,6 +128,7 @@ do { \
 static IndexScanDesc index_beginscan_internal(Relation indexRelation,
 						 int nkeys, int norderbys, Snapshot snapshot,
 						 ParallelIndexScanDesc pscan, bool temp_snap);
+static Oid tuple_extract_relid(IndexScanDesc scan);
 
 
 /* ----------------------------------------------------------------
@@ -226,6 +229,26 @@ index_beginscan(Relation heapRelation,
 	IndexScanDesc scan;
 
 	scan = index_beginscan_internal(indexRelation, nkeys, norderbys, snapshot, NULL, false);
+
+	// scan->heapRelationsMap = NULL;
+	if (!indexRelation->rd_index->indisglobal)
+		scan->heapRelationsMap = NULL;
+	else
+	{
+		// scan->heapRelationsMap = NULL;
+		HASHCTL		ctl;
+		// MemoryContext oldcxt;
+
+		// oldcxt = MemoryContextSwitchTo(TopTransactionContext);
+
+		memset(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(Oid);
+		ctl.entrysize = sizeof(Relation);
+		scan->heapRelationsMap = hash_create("index relations", 100, &ctl, HASH_ELEM);
+
+		scan->xs_want_itup = true;
+		// MemoryContextSwitchTo(oldcxt);
+	}
 
 	/*
 	 * Save additional parameters into the scandesc.  Everything else was set
@@ -351,6 +374,9 @@ index_endscan(IndexScanDesc scan)
 
 	/* End the AM's scan */
 	scan->indexRelation->rd_amroutine->amendscan(scan);
+
+	// if (scan->indexRelation->rd_index->indisglobal)
+	// 	hash_destroy(scan->heapRelationsMap);
 
 	/* Release index refcount acquired by index_beginscan */
 	RelationDecrementReferenceCount(scan->indexRelation);
@@ -540,6 +566,21 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	 */
 	found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
 
+	if (scan->indexRelation->rd_index->indisglobal)
+	{
+		Oid		relid = tuple_extract_relid(scan);
+		Relation *partRel;
+		bool	found = false;
+
+		partRel = hash_search(scan->heapRelationsMap, &relid, HASH_ENTER, &found);
+		if (!found)
+		{
+			/* TODO: get appropriate lock */
+			*partRel = heap_open(relid, AccessShareLock);
+		}
+		scan->heapRelation = *partRel;
+	}
+
 	/* Reset kill flag immediately for safety */
 	scan->kill_prior_tuple = false;
 
@@ -559,6 +600,19 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 
 	/* Return the TID of the tuple we found. */
 	return &scan->xs_ctup.t_self;
+}
+
+static Oid
+tuple_extract_relid(IndexScanDesc scan)
+{
+	TupleDesc	desc = scan->indexRelation->rd_att;
+	bool		isnull;
+	Datum		relid;
+
+	relid = index_getattr(scan->xs_itup, desc->natts - 1, desc, &isnull);
+	Assert(!isnull);
+
+	return DatumGetObjectId(relid);
 }
 
 /* ----------------
