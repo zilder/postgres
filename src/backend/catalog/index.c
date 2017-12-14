@@ -2703,6 +2703,14 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 					   values,
 					   isnull);
 
+		/* TODO: move following code to FormIndexDatum */
+		/* Set heap relid for global index */
+		if (indexInfo->ii_Global)
+		{
+			values[indexInfo->ii_NumIndexAttrs] = heapRelation->rd_id;
+			isnull[indexInfo->ii_NumIndexAttrs] = false;
+		}
+
 		/*
 		 * You'd think we should go ahead and build the index tuple here, but
 		 * some index AMs want to do further processing on the data first.  So

@@ -375,8 +375,17 @@ index_endscan(IndexScanDesc scan)
 	/* End the AM's scan */
 	scan->indexRelation->rd_amroutine->amendscan(scan);
 
-	// if (scan->indexRelation->rd_index->indisglobal)
-	// 	hash_destroy(scan->heapRelationsMap);
+	if (scan->indexRelation->rd_index->indisglobal)
+	{
+		HASH_SEQ_STATUS	status;
+		Relation	   *childRel;
+
+		hash_seq_init(&status, scan->heapRelationsMap);
+		while ((childRel = (Relation *) hash_seq_search(&status)) != NULL)
+			heap_close(*childRel, AccessShareLock);
+
+		hash_destroy(scan->heapRelationsMap);
+	}
 
 	/* Release index refcount acquired by index_beginscan */
 	RelationDecrementReferenceCount(scan->indexRelation);
@@ -609,7 +618,8 @@ tuple_extract_relid(IndexScanDesc scan)
 	bool		isnull;
 	Datum		relid;
 
-	relid = index_getattr(scan->xs_itup, desc->natts - 1, desc, &isnull);
+	/* Heap relid is stored in the last attribute */
+	relid = index_getattr(scan->xs_itup, desc->natts, desc, &isnull);
 	Assert(!isnull);
 
 	return DatumGetObjectId(relid);
