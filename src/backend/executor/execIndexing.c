@@ -355,6 +355,16 @@ ExecInsertIndexTuples(TupleTableSlot *slot,
 					   values,
 					   isnull);
 
+		/*
+		 * TODO: the same code is in IndexBuildHeapScan(). Probably it should be
+		 * moved to index_form_tuple() or something.
+		 */
+		if (indexInfo->ii_Global)
+		{
+			values[indexInfo->ii_NumIndexAttrs] = heapRelation->rd_id;
+			isnull[indexInfo->ii_NumIndexAttrs] = false;
+		}
+
 		/* Check whether to apply noDupErr to this index */
 		applyNoDupErr = noDupErr &&
 			(arbiterIndexes == NIL ||

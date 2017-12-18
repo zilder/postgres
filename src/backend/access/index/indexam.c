@@ -575,14 +575,14 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	 */
 	found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
 
-	if (scan->indexRelation->rd_index->indisglobal)
+	if (found && scan->indexRelation->rd_index->indisglobal)
 	{
 		Oid		relid = tuple_extract_relid(scan);
 		Relation *partRel;
-		bool	found = false;
+		bool	exists = false;
 
-		partRel = hash_search(scan->heapRelationsMap, &relid, HASH_ENTER, &found);
-		if (!found)
+		partRel = hash_search(scan->heapRelationsMap, &relid, HASH_ENTER, &exists);
+		if (!exists)
 		{
 			/* TODO: get appropriate lock */
 			*partRel = heap_open(relid, AccessShareLock);

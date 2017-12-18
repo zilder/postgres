@@ -567,6 +567,18 @@ ExecInsert(ModifyTableState *mtstate,
 												   estate, true, &specConflict,
 												   arbiterIndexes);
 
+			/* TODO: insert tuple to global indexes */
+			if (saved_resultRelInfo)
+			{
+				ResultRelInfo *tmp = estate->es_result_relation_info;
+
+				estate->es_result_relation_info = saved_resultRelInfo;
+				recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
+												   estate, true, &specConflict,
+												   arbiterIndexes);
+				estate->es_result_relation_info = tmp;
+			}
+
 			/* adjust the tuple's state accordingly */
 			if (!specConflict)
 				heap_finish_speculative(resultRelationDesc, tuple);
@@ -612,6 +624,18 @@ ExecInsert(ModifyTableState *mtstate,
 				recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
 													   estate, false, NULL,
 													   arbiterIndexes);
+
+			/* TODO: insert tuple to global indexes */
+			if (saved_resultRelInfo)
+			{
+				ResultRelInfo *tmp = estate->es_result_relation_info;
+
+				estate->es_result_relation_info = saved_resultRelInfo;
+				recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
+												   estate, true, NULL,
+												   arbiterIndexes);
+				estate->es_result_relation_info = tmp;
+			}
 		}
 	}
 
