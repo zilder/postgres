@@ -275,7 +275,6 @@ do_compile(FunctionCallInfo fcinfo,
 	bool		isnull;
 	char	   *proc_source;
 	HeapTuple	typeTup;
-	Form_pg_type typeStruct;
 	PLpgSQL_variable *var;
 	PLpgSQL_rec *rec;
 	int			i;
@@ -531,53 +530,58 @@ do_compile(FunctionCallInfo fcinfo,
 			/*
 			 * Lookup the function's return type
 			 */
-			typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rettypeid));
-			if (!HeapTupleIsValid(typeTup))
-				elog(ERROR, "cache lookup failed for type %u", rettypeid);
-			typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
-
-			/* Disallow pseudotype result, except VOID or RECORD */
-			/* (note we already replaced polymorphic types) */
-			if (typeStruct->typtype == TYPTYPE_PSEUDO)
+			if (rettypeid)
 			{
-				if (rettypeid == VOIDOID ||
-					rettypeid == RECORDOID)
-					 /* okay */ ;
-				else if (rettypeid == TRIGGEROID || rettypeid == EVTTRIGGEROID)
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("trigger functions can only be called as triggers")));
-				else
-					ereport(ERROR,
-							(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-							 errmsg("PL/pgSQL functions cannot return type %s",
-									format_type_be(rettypeid))));
-			}
+				Form_pg_type typeStruct;
 
-			if (typeStruct->typrelid != InvalidOid ||
-				rettypeid == RECORDOID)
-				function->fn_retistuple = true;
-			else
-			{
-				function->fn_retbyval = typeStruct->typbyval;
-				function->fn_rettyplen = typeStruct->typlen;
+				typeTup = SearchSysCache1(TYPEOID, ObjectIdGetDatum(rettypeid));
+				if (!HeapTupleIsValid(typeTup))
+					elog(ERROR, "cache lookup failed for type %u", rettypeid);
+				typeStruct = (Form_pg_type) GETSTRUCT(typeTup);
 
-				/*
-				 * install $0 reference, but only for polymorphic return
-				 * types, and not when the return is specified through an
-				 * output parameter.
-				 */
-				if (IsPolymorphicType(procStruct->prorettype) &&
-					num_out_args == 0)
+				/* Disallow pseudotype result, except VOID or RECORD */
+				/* (note we already replaced polymorphic types) */
+				if (typeStruct->typtype == TYPTYPE_PSEUDO)
 				{
-					(void) plpgsql_build_variable("$0", 0,
-												  build_datatype(typeTup,
-																 -1,
-																 function->fn_input_collation),
-												  true);
+					if (rettypeid == VOIDOID ||
+						rettypeid == RECORDOID)
+						 /* okay */ ;
+					else if (rettypeid == TRIGGEROID || rettypeid == EVTTRIGGEROID)
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("trigger functions can only be called as triggers")));
+					else
+						ereport(ERROR,
+								(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								 errmsg("PL/pgSQL functions cannot return type %s",
+										format_type_be(rettypeid))));
 				}
+
+				if (typeStruct->typrelid != InvalidOid ||
+					rettypeid == RECORDOID)
+					function->fn_retistuple = true;
+				else
+				{
+					function->fn_retbyval = typeStruct->typbyval;
+					function->fn_rettyplen = typeStruct->typlen;
+
+					/*
+					 * install $0 reference, but only for polymorphic return
+					 * types, and not when the return is specified through an
+					 * output parameter.
+					 */
+					if (IsPolymorphicType(procStruct->prorettype) &&
+						num_out_args == 0)
+					{
+						(void) plpgsql_build_variable("$0", 0,
+													  build_datatype(typeTup,
+																	 -1,
+																	 function->fn_input_collation),
+													  true);
+					}
+				}
+				ReleaseSysCache(typeTup);
 			}
-			ReleaseSysCache(typeTup);
 			break;
 
 		case PLPGSQL_DML_TRIGGER:
@@ -2380,14 +2384,14 @@ plpgsql_finish_datums(PLpgSQL_function *function)
 
 /* ----------
  * plpgsql_add_initdatums		Make an array of the datum numbers of
- *					all the simple VAR datums created since the last call
+ *					all the initializable datums created since the last call
  *					to this function.
  *
  * If varnos is NULL, we just forget any datum entries created since the
  * last call.
  *
- * This is used around a DECLARE section to create a list of the VARs
- * that have to be initialized at block entry.  Note that VARs can also
+ * This is used around a DECLARE section to create a list of the datums
+ * that have to be initialized at block entry.  Note that datums can also
  * be created elsewhere than DECLARE, eg by a FOR-loop, but it is then
  * the responsibility of special-purpose code to initialize them.
  * ----------
@@ -2398,11 +2402,16 @@ plpgsql_add_initdatums(int **varnos)
 	int			i;
 	int			n = 0;
 
+	/*
+	 * The set of dtypes recognized here must match what exec_stmt_block()
+	 * cares about (re)initializing at block entry.
+	 */
 	for (i = datums_last; i < plpgsql_nDatums; i++)
 	{
 		switch (plpgsql_Datums[i]->dtype)
 		{
 			case PLPGSQL_DTYPE_VAR:
+			case PLPGSQL_DTYPE_REC:
 				n++;
 				break;
 
@@ -2423,6 +2432,7 @@ plpgsql_add_initdatums(int **varnos)
 				switch (plpgsql_Datums[i]->dtype)
 				{
 					case PLPGSQL_DTYPE_VAR:
+					case PLPGSQL_DTYPE_REC:
 						(*varnos)[n++] = plpgsql_Datums[i]->dno;
 
 					default:

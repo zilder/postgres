@@ -242,6 +242,7 @@ _copyAppend(const Append *from)
 	 */
 	COPY_NODE_FIELD(partitioned_rels);
 	COPY_NODE_FIELD(appendplans);
+	COPY_SCALAR_FIELD(first_partial_plan);
 
 	return newnode;
 }
@@ -3210,6 +3211,16 @@ _copyClosePortalStmt(const ClosePortalStmt *from)
 	return newnode;
 }
 
+static CallStmt *
+_copyCallStmt(const CallStmt *from)
+{
+	CallStmt *newnode = makeNode(CallStmt);
+
+	COPY_NODE_FIELD(funccall);
+
+	return newnode;
+}
+
 static ClusterStmt *
 _copyClusterStmt(const ClusterStmt *from)
 {
@@ -3412,6 +3423,7 @@ _copyCreateFunctionStmt(const CreateFunctionStmt *from)
 	COPY_NODE_FIELD(funcname);
 	COPY_NODE_FIELD(parameters);
 	COPY_NODE_FIELD(returnType);
+	COPY_SCALAR_FIELD(is_procedure);
 	COPY_NODE_FIELD(options);
 	COPY_NODE_FIELD(withClause);
 
@@ -3436,6 +3448,7 @@ _copyAlterFunctionStmt(const AlterFunctionStmt *from)
 {
 	AlterFunctionStmt *newnode = makeNode(AlterFunctionStmt);
 
+	COPY_SCALAR_FIELD(objtype);
 	COPY_NODE_FIELD(func);
 	COPY_NODE_FIELD(actions);
 
@@ -5104,6 +5117,9 @@ copyObjectImpl(const void *from)
 			break;
 		case T_ClosePortalStmt:
 			retval = _copyClosePortalStmt(from);
+			break;
+		case T_CallStmt:
+			retval = _copyCallStmt(from);
 			break;
 		case T_ClusterStmt:
 			retval = _copyClusterStmt(from);

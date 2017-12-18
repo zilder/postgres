@@ -72,6 +72,13 @@
  * of datum-tuples with 2 datums, modulus and remainder, corresponding to a
  * given partition.
  *
+ * The datums in datums array are arranged in increasing order as defined by
+ * functions qsort_partition_rbound_cmp(), qsort_partition_list_value_cmp() and
+ * qsort_partition_hbound_cmp() for range, list and hash partitioned tables
+ * respectively. For range and list partitions this simply means that the
+ * datums in the datums array are arranged in increasing order as defined by
+ * the partition key's operator classes and collations.
+ *
  * In the case of list partitioning, the indexes array stores one entry for
  * every datum, which is the index of the partition that accepts a given datum.
  * In case of range partitioning, it stores one entry per distinct range
@@ -513,9 +520,10 @@ RelationBuildPartitionDesc(Relation rel)
 	}
 
 	/* Now build the actual relcache partition descriptor */
-	rel->rd_pdcxt = AllocSetContextCreate(CacheMemoryContext,
-										  RelationGetRelationName(rel),
-										  ALLOCSET_DEFAULT_SIZES);
+	rel->rd_pdcxt = AllocSetContextCreateExtended(CacheMemoryContext,
+												  RelationGetRelationName(rel),
+												  MEMCONTEXT_COPY_NAME,
+												  ALLOCSET_DEFAULT_SIZES);
 	oldcxt = MemoryContextSwitchTo(rel->rd_pdcxt);
 
 	result = (PartitionDescData *) palloc0(sizeof(PartitionDescData));
@@ -751,15 +759,13 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 
 	if (b1->strategy == PARTITION_STRATEGY_HASH)
 	{
-		int			greatest_modulus;
+		int			greatest_modulus = get_greatest_modulus(b1);
 
 		/*
 		 * If two hash partitioned tables have different greatest moduli,
-		 * their partition schemes don't match.  For hash partitioned table,
-		 * the greatest modulus is given by the last datum and number of
-		 * partitions is given by ndatums.
+		 * their partition schemes don't match.
 		 */
-		if (b1->datums[b1->ndatums - 1][0] != b2->datums[b2->ndatums - 1][0])
+		if (greatest_modulus != get_greatest_modulus(b2))
 			return false;
 
 		/*
@@ -773,7 +779,6 @@ partition_bounds_equal(int partnatts, int16 *parttyplen, bool *parttypbyval,
 		 * their indexes array will be same.  So, it suffices to compare
 		 * indexes array.
 		 */
-		greatest_modulus = get_greatest_modulus(b1);
 		for (i = 0; i < greatest_modulus; i++)
 			if (b1->indexes[i] != b2->indexes[i])
 				return false;

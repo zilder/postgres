@@ -23,6 +23,7 @@
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "access/xlog.h"
+#include "catalog/dependency.h"
 #include "catalog/pg_type.h"
 #include "commands/copy.h"
 #include "commands/defrem.h"
@@ -2478,7 +2479,8 @@ CopyFrom(CopyState cstate)
 		int			num_parted,
 					num_partitions;
 
-		ExecSetupPartitionTupleRouting(cstate->rel,
+		ExecSetupPartitionTupleRouting(NULL,
+									   cstate->rel,
 									   1,
 									   estate,
 									   &partition_dispatch_info,
@@ -3066,8 +3068,19 @@ BeginCopyFrom(ParseState *pstate,
 		{
 			/* attribute is NOT to be copied from input */
 			/* use default value if one exists */
-			Expr	   *defexpr = (Expr *) build_column_default(cstate->rel,
-																attnum);
+			Expr	   *defexpr;
+
+			if (att->attidentity)
+			{
+				NextValueExpr *nve = makeNode(NextValueExpr);
+
+				nve->seqid = getOwnedSequence(RelationGetRelid(cstate->rel),
+											  attnum);
+				nve->typeId = att->atttypid;
+				defexpr = (Expr *) nve;
+			}
+			else
+				defexpr = (Expr *) build_column_default(cstate->rel, attnum);
 
 			if (defexpr != NULL)
 			{
