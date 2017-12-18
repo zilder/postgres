@@ -61,6 +61,12 @@
 #define ERRCODE_UNDEFINED_TABLE  "42P01"
 
 /*
+ * FNV hashing constants
+ */
+#define FNV_PRIME 16777619
+#define FNV_OFFSET_BASIS 0x811c9dc5
+
+/*
  * Multi-platform pthread implementations
  */
 
@@ -1847,6 +1853,33 @@ evalFunc(TState *thread, CState *st,
 					}
 				}
 
+				return true;
+			}
+
+			/* hashing */
+		case PGBENCH_HASH:
+			{
+				int		i;
+				int64	val;
+				int32	result;
+
+				if (!coerceToInt(&vargs[0], &val))
+					return false;
+
+				/*
+				 * https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
+				 */
+				result = FNV_OFFSET_BASIS;
+				for (i = 0; i < 4; ++i)
+				{
+					int32 octet = val & 0x000000ff;
+
+					val = val >> 8;
+					result = result ^ octet;
+					result = result * FNV_PRIME;
+				}
+
+				setIntValue(retval, result);
 				return true;
 			}
 
