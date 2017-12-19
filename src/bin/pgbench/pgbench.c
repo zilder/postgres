@@ -63,8 +63,8 @@
 /*
  * FNV hashing constants
  */
-#define FNV_PRIME 16777619
-#define FNV_OFFSET_BASIS 0x811c9dc5
+#define FNV_PRIME 1099511628211
+#define FNV_OFFSET_BASIS 0xcbf29ce484222325
 
 /*
  * Multi-platform pthread implementations
@@ -1861,7 +1861,7 @@ evalFunc(TState *thread, CState *st,
 			{
 				int		i;
 				int64	val;
-				int32	result;
+				int64	result;
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
@@ -1870,9 +1870,9 @@ evalFunc(TState *thread, CState *st,
 				 * https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
 				 */
 				result = FNV_OFFSET_BASIS;
-				for (i = 0; i < 4; ++i)
+				for (i = 0; i < 8; ++i)
 				{
-					int32 octet = val & 0x000000ff;
+					int32 octet = val & 0xff;
 
 					val = val >> 8;
 					result = result ^ octet;
