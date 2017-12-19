@@ -1867,7 +1867,7 @@ evalFunc(TState *thread, CState *st,
 					return false;
 
 				/*
-				 * https://en.wikipedia.org/wiki/Fowler–Noll–Vo_hash_function
+				 * Fowler–Noll–Vo hash
 				 */
 				result = FNV_OFFSET_BASIS;
 				for (i = 0; i < 8; ++i)
