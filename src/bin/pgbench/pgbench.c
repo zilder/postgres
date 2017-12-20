@@ -918,6 +918,28 @@ getZipfianRand(TState *thread, int64 min, int64 max, double s)
 }
 
 /*
+ * FNV-1a hash function
+ */
+static int64
+getHashFnv(int64 val)
+{
+	int64	result;
+	int		i;
+
+	result = FNV_OFFSET_BASIS;
+	for (i = 0; i < 8; ++i)
+	{
+		int32 octet = val & 0xff;
+
+		val = val >> 8;
+		result = result ^ octet;
+		result = result * FNV_PRIME;
+	}
+
+	return result;
+}
+
+/*
  * Initialize the given SimpleStats struct to all zeroes
  */
 static void
@@ -1857,29 +1879,14 @@ evalFunc(TState *thread, CState *st,
 			}
 
 			/* hashing */
-		case PGBENCH_HASH:
+		case PGBENCH_HASH_FNV1A:
 			{
-				int		i;
 				int64	val;
-				int64	result;
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
 
-				/*
-				 * Fowler–Noll–Vo hash
-				 */
-				result = FNV_OFFSET_BASIS;
-				for (i = 0; i < 8; ++i)
-				{
-					int32 octet = val & 0xff;
-
-					val = val >> 8;
-					result = result ^ octet;
-					result = result * FNV_PRIME;
-				}
-
-				setIntValue(retval, result);
+				setIntValue(retval, getHashFnv(val));
 				return true;
 			}
 

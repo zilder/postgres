@@ -195,7 +195,7 @@ static const struct
 		"random_zipfian", 3, PGBENCH_RANDOM_ZIPFIAN
 	},
 	{
-		"hash", 1, PGBENCH_HASH
+		"hash_fnv1a", 1, PGBENCH_HASH_FNV1A
 	},
 	/* keep as last array element */
 	{
