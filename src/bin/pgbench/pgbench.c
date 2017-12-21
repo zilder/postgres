@@ -61,7 +61,7 @@
 #define ERRCODE_UNDEFINED_TABLE  "42P01"
 
 /*
- * FNV hashing constants
+ * Hashing constants
  */
 #define FNV_PRIME 1099511628211
 #define FNV_OFFSET_BASIS 0xcbf29ce484222325
@@ -921,7 +921,7 @@ getZipfianRand(TState *thread, int64 min, int64 max, double s)
  * FNV-1a hash function
  */
 static int64
-getHashFnv(int64 val)
+getHashFnv1a(int64 val)
 {
 	int64	result;
 	int		i;
@@ -937,6 +937,28 @@ getHashFnv(int64 val)
 	}
 
 	return result;
+}
+
+static int64
+getHashMurmur2(int64 val)
+{
+	const uint64 m = 0xc6a4a7935bd1e995;
+	const int	r = 47;
+	uint64		result = val ^ (sizeof(int64) * m);
+	uint64		k = (uint64) val;
+
+	k *= m;
+	k ^= k >> r;
+	k *= m;
+
+	result ^= k;
+	result *= m;
+
+	result ^= result >> r;
+	result *= m;
+	result ^= result >> r;
+
+	return (int64) result;
 }
 
 /*
@@ -1880,13 +1902,17 @@ evalFunc(TState *thread, CState *st,
 
 			/* hashing */
 		case PGBENCH_HASH_FNV1A:
+		case PGBENCH_HASH_MURMUR2:
 			{
 				int64	val;
+				int64	result;
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
 
-				setIntValue(retval, getHashFnv(val));
+				result = (func == PGBENCH_HASH_FNV1A) ?
+					getHashFnv1a(val) : getHashMurmur2(val);
+				setIntValue(retval, result);
 				return true;
 			}
 

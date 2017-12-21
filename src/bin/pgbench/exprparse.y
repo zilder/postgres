@@ -197,6 +197,9 @@ static const struct
 	{
 		"hash_fnv1a", 1, PGBENCH_HASH_FNV1A
 	},
+	{
+		"hash_murmur2", 1, PGBENCH_HASH_MURMUR2
+	},
 	/* keep as last array element */
 	{
 		NULL, 0, 0
