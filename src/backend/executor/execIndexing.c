@@ -361,7 +361,12 @@ ExecInsertIndexTuples(TupleTableSlot *slot,
 		 */
 		if (indexInfo->ii_Global)
 		{
-			values[indexInfo->ii_NumIndexAttrs] = heapRelation->rd_id;
+			/* TODO: add separate field for partition relid */
+			// ResultRelInfo *roots = estate->es_root_result_relations;
+
+			// Assert(estate->es_num_root_result_relations == 1);
+			// values[indexInfo->ii_NumIndexAttrs] = roots[0].ri_RelationDesc->rd_id;
+			values[indexInfo->ii_NumIndexAttrs] = estate->es_currentPartitionRelid;
 			isnull[indexInfo->ii_NumIndexAttrs] = false;
 		}
 

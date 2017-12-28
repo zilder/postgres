@@ -570,13 +570,30 @@ ExecInsert(ModifyTableState *mtstate,
 			/* TODO: insert tuple to global indexes */
 			if (saved_resultRelInfo)
 			{
-				ResultRelInfo *tmp = estate->es_result_relation_info;
+				ResultRelInfo *oldResultInfo = estate->es_result_relation_info;
 
+				estate->es_currentPartitionRelid = RelationGetRelid(resultRelationDesc);
+				// Assert(estate->es_num_root_result_relations == 1);
+				// estate->es_result_relation_info = &estate->es_root_result_relations[0];
 				estate->es_result_relation_info = saved_resultRelInfo;
+
+
+				// ResultRelInfo *child_rel = estate->es_result_relation_info;
+				// ResultRelInfo *old_roots = estate->es_root_result_relations;
+				// int old_roots_num = estate->es_num_root_result_relations;
+
+				// estate->es_result_relation_info = saved_resultRelInfo;
+				// estate->es_root_result_relations = child_rel;
+				// estate->es_num_root_result_relations = 1;
 				recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
 												   estate, true, &specConflict,
 												   arbiterIndexes);
-				estate->es_result_relation_info = tmp;
+
+				estate->es_result_relation_info = oldResultInfo;
+
+				// estate->es_num_root_result_relations = old_roots_num;
+				// estate->es_root_result_relations = old_roots;
+				// estate->es_result_relation_info = child_rel;
 			}
 
 			/* adjust the tuple's state accordingly */
@@ -628,13 +645,29 @@ ExecInsert(ModifyTableState *mtstate,
 			/* TODO: insert tuple to global indexes */
 			if (saved_resultRelInfo)
 			{
-				ResultRelInfo *tmp = estate->es_result_relation_info;
+				ResultRelInfo *oldResultInfo = estate->es_result_relation_info;
 
+				estate->es_currentPartitionRelid = RelationGetRelid(resultRelationDesc);
+				// Assert(estate->es_num_root_result_relations);
+				// estate->es_result_relation_info = &estate->es_root_result_relations[0];
 				estate->es_result_relation_info = saved_resultRelInfo;
+
+				// ResultRelInfo *child_rel = estate->es_result_relation_info;
+				// ResultRelInfo *old_roots = estate->es_root_result_relations;
+				// int old_roots_num = estate->es_num_root_result_relations;
+
+				// estate->es_result_relation_info = saved_resultRelInfo;
+				// estate->es_root_result_relations = child_rel;
+				// estate->es_num_root_result_relations = 1;
 				recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
 												   estate, true, NULL,
 												   arbiterIndexes);
-				estate->es_result_relation_info = tmp;
+
+				estate->es_result_relation_info = oldResultInfo;
+
+				// estate->es_num_root_result_relations = old_roots_num;
+				// estate->es_root_result_relations = old_roots;
+				// estate->es_result_relation_info = child_rel;
 			}
 		}
 	}
@@ -1178,6 +1211,29 @@ lreplace:;
 		if (resultRelInfo->ri_NumIndices > 0 && !HeapTupleIsHeapOnly(tuple))
 			recheckIndexes = ExecInsertIndexTuples(slot, &(tuple->t_self),
 												   estate, false, NULL, NIL);
+
+		// if (mtstate->mt_partition_dispatch_info)
+		if (estate->es_num_root_result_relations)
+		{
+			ResultRelInfo *oldResultInfo = estate->es_result_relation_info;
+
+			estate->es_currentPartitionRelid = RelationGetRelid(resultRelationDesc);
+			Assert(estate->es_num_root_result_relations == 1);
+			estate->es_result_relation_info = &estate->es_root_result_relations[0];
+
+			ExecOpenIndices(estate->es_result_relation_info, mtstate->mt_onconflict != ONCONFLICT_NONE);
+
+			/*recheckIndexes = */ExecInsertIndexTuples(slot, &(tuple->t_self),
+											   estate, false, NULL, NIL);
+
+			ExecCloseIndices(estate->es_result_relation_info);
+
+			estate->es_result_relation_info = oldResultInfo;
+
+			// estate->es_num_root_result_relations = old_roots_num;
+			// estate->es_root_result_relations = old_roots;
+			// estate->es_result_relation_info = child_rel;
+		}
 	}
 
 	if (canSetTag)

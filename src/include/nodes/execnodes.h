@@ -443,6 +443,8 @@ typedef struct EState
 	int			es_num_result_relations;	/* length of array */
 	ResultRelInfo *es_result_relation_info; /* currently active array elt */
 
+	Oid			es_currentPartitionRelid; /* partition being modified */
+
 	/*
 	 * Info about the target partitioned target table root(s) for
 	 * update/delete queries.  They required only to fire any per-statement
