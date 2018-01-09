@@ -63,8 +63,10 @@
 /*
  * Hashing constants
  */
-#define FNV_PRIME 1099511628211
+#define FNV_PRIME 0x100000001b3
 #define FNV_OFFSET_BASIS 0xcbf29ce484222325
+#define MM2_MUL 0xc6a4a7935bd1e995
+#define MM2_ROT 47
 
 /*
  * Multi-platform pthread implementations
@@ -921,12 +923,12 @@ getZipfianRand(TState *thread, int64 min, int64 max, double s)
  * FNV-1a hash function
  */
 static int64
-getHashFnv1a(int64 val)
+getHashFnv1a(int64 val, uint64 seed)
 {
 	int64	result;
 	int		i;
 
-	result = FNV_OFFSET_BASIS;
+	result = FNV_OFFSET_BASIS ^ seed;
 	for (i = 0; i < 8; ++i)
 	{
 		int32 octet = val & 0xff;
@@ -939,24 +941,25 @@ getHashFnv1a(int64 val)
 	return result;
 }
 
+/*
+ * Murmur2 hash function
+ */
 static int64
-getHashMurmur2(int64 val)
+getHashMurmur2(int64 val, uint64 seed)
 {
-	const uint64 m = 0xc6a4a7935bd1e995;
-	const int	r = 47;
-	uint64		result = val ^ (sizeof(int64) * m);
-	uint64		k = (uint64) val;
+	uint64	result = seed ^ (sizeof(int64) * MM2_MUL);
+	uint64	k = (uint64) val;
 
-	k *= m;
-	k ^= k >> r;
-	k *= m;
+	k *= MM2_MUL;
+	k ^= k >> MM2_ROT;
+	k *= MM2_MUL;
 
 	result ^= k;
-	result *= m;
+	result *= MM2_MUL;
 
-	result ^= result >> r;
-	result *= m;
-	result ^= result >> r;
+	result ^= result >> MM2_ROT;
+	result *= MM2_MUL;
+	result ^= result >> MM2_ROT;
 
 	return (int64) result;
 }
@@ -1905,13 +1908,28 @@ evalFunc(TState *thread, CState *st,
 		case PGBENCH_HASH_MURMUR2:
 			{
 				int64	val;
+				int64	seed = 0;
 				int64	result;
+
+				Assert(nargs >= 1);
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
 
+				if (nargs > 2)
+				{
+					fprintf(stderr,
+							"hash function accepts maximum of two arguments\n");
+					return false;
+				}
+
+				/* read optional seed value */
+				if (nargs > 1)
+					if (!coerceToInt(&vargs[1], &seed))
+						return false;
+
 				result = (func == PGBENCH_HASH_FNV1A) ?
-					getHashFnv1a(val) : getHashMurmur2(val);
+					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
 				setIntValue(retval, result);
 				return true;
 			}

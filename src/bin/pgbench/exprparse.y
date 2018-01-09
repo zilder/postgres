@@ -131,7 +131,8 @@ make_op(yyscan_t yyscanner, const char *operator,
  * List of available functions:
  * - fname: function name
  * - nargs: number of arguments
- *			-1 is a special value for least & greatest meaning #args >= 1
+ *			-1 is a special value for least, greatest & hash functions
+ *			 meaning variable arguments number
  * - tag: function identifier from PgBenchFunction enum
  */
 static const struct
@@ -195,10 +196,13 @@ static const struct
 		"random_zipfian", 3, PGBENCH_RANDOM_ZIPFIAN
 	},
 	{
-		"hash_fnv1a", 1, PGBENCH_HASH_FNV1A
+		"hash", -1, PGBENCH_HASH_MURMUR2
 	},
 	{
-		"hash_murmur2", 1, PGBENCH_HASH_MURMUR2
+		"hash_murmur2", -1, PGBENCH_HASH_MURMUR2
+	},
+	{
+		"hash_fnv1a", -1, PGBENCH_HASH_FNV1A
 	},
 	/* keep as last array element */
 	{
