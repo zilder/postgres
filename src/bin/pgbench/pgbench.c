@@ -2262,6 +2262,36 @@ evalStandardFunc(
 							 vargs[0].type == vargs[1].type &&
 							 vargs[0].u.bval == vargs[1].u.bval);
 				return true;
+
+			/* hashing */
+		case PGBENCH_HASH_FNV1A:
+		case PGBENCH_HASH_MURMUR2:
+			{
+				int64	val;
+				int64	seed = 0;
+				int64	result;
+
+				Assert(nargs >= 1);
+
+				if (!coerceToInt(&vargs[0], &val))
+					return false;
+
+				if (nargs > 2)
+				{
+					fprintf(stderr,
+							"hash function accepts maximum of two arguments\n");
+					return false;
+				}
+
+				/* read optional seed value */
+				if (nargs > 1)
+					if (!coerceToInt(&vargs[1], &seed))
+						return false;
+
+				result = (func == PGBENCH_HASH_FNV1A) ?
+					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
+				setIntValue(retval, result);
+				return true;
 			}
 
 			/* hashing */
