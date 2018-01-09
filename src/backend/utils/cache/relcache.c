@@ -4357,7 +4357,7 @@ RelationGetFKeyList(Relation relation)
  * replication identity index, or InvalidOid if there is no such index.
  */
 List *
-RelationGetIndexList(Relation relation)
+RelationGetIndexList(Relation relation, bool including_global)
 {
 	Relation	indrel;
 	SysScanDesc indscan;

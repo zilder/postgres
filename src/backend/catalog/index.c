@@ -3437,6 +3437,28 @@ IndexGetRelation(Oid indexId, bool missing_ok)
 	return result;
 }
 
+bool
+IndexIsGlobal(Oid indexId, bool missing_ok)
+{
+	HeapTuple	tuple;
+	Form_pg_index index;
+	bool		result;
+
+	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexId));
+	if (!HeapTupleIsValid(tuple))
+	{
+		if (missing_ok)
+			return InvalidOid;
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+	}
+	index = (Form_pg_index) GETSTRUCT(tuple);
+	Assert(index->indexrelid == indexId);
+
+	result = index->indisglobal;
+	ReleaseSysCache(tuple);
+	return result;
+}
+
 /*
  * reindex_index - This routine is used to recreate a single index
  */

@@ -149,6 +149,7 @@ void
 ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 {
 	Relation	resultRelation = resultRelInfo->ri_RelationDesc;
+	Relation	partitionRoot = resultRelInfo->ri_PartitionRoot;
 	List	   *indexoidlist;
 	ListCell   *l;
 	int			len,
@@ -159,13 +160,51 @@ ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 	resultRelInfo->ri_NumIndices = 0;
 
 	/* fast path if no indexes */
+	/* TODO: traverse the whole partitioning tree */
 	if (!RelationGetForm(resultRelation)->relhasindex)
-		return;
+	{
+		if (partitionRoot)
+		{
+			if (!RelationGetForm(partitionRoot)->relhasindex)
+				return;
+		}
+		else
+
+			return;
+	}
 
 	/*
 	 * Get cached list of index OIDs
 	 */
 	indexoidlist = RelationGetIndexList(resultRelation);
+
+	/* TODO */
+	if (!partitionRoot && resultRelInfo->ri_PartitionCheck)
+	{
+		Oid root = get_partition_parent(RelationGetRelid(resultRelation));
+
+		if (OidIsValid(root))
+			resultRelInfo->ri_PartitionRoot = partitionRoot =
+				heap_open(root, AccessShareLock);
+	}
+
+	/*
+	 * Add global indexes
+	 */
+	if (partitionRoot)
+	{
+		ListCell *lc;
+		List *rootIndexoidlist = RelationGetIndexList(partitionRoot);
+
+		foreach (lc, rootIndexoidlist)
+		{
+			Oid indexoid = lfirst_oid(lc);
+
+			if (IndexIsGlobal(indexoid, false))
+				indexoidlist = lappend_oid(indexoidlist, indexoid);
+		}
+	}
+
 	len = list_length(indexoidlist);
 	if (len == 0)
 		return;
@@ -366,7 +405,8 @@ ExecInsertIndexTuples(TupleTableSlot *slot,
 
 			// Assert(estate->es_num_root_result_relations == 1);
 			// values[indexInfo->ii_NumIndexAttrs] = roots[0].ri_RelationDesc->rd_id;
-			values[indexInfo->ii_NumIndexAttrs] = estate->es_currentPartitionRelid;
+			// values[indexInfo->ii_NumIndexAttrs] = estate->es_currentPartitionRelid;
+			values[indexInfo->ii_NumIndexAttrs] = RelationGetRelid(heapRelation);
 			isnull[indexInfo->ii_NumIndexAttrs] = false;
 		}
 

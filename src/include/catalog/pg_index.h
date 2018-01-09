@@ -60,8 +60,6 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 #endif
 } FormData_pg_index;
 
-	//bool		indisglobal;	/* is this a global index? */
-
 /* ----------------
  *		Form_pg_index corresponds to a pointer to a tuple with
  *		the format of pg_index relation.
