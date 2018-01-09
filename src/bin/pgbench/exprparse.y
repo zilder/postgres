@@ -349,6 +349,15 @@ static const struct
 	{
 		"!case_end", -2, PGBENCH_CASE
 	},
+	{
+		"hash", -1, PGBENCH_HASH_MURMUR2
+	},
+	{
+		"hash_murmur2", -1, PGBENCH_HASH_MURMUR2
+	},
+	{
+		"hash_fnv1a", -1, PGBENCH_HASH_FNV1A
+	},
 	/* keep as last array element */
 	{
 		NULL, 0, 0
