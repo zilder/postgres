@@ -2269,7 +2269,7 @@ evalStandardFunc(
 		case PGBENCH_HASH_MURMUR2:
 			{
 				int64	val;
-				int64	seed = 0;
+				int64	seed;
 				int64	result;
 
 				Assert(nargs >= 1);
@@ -2279,8 +2279,12 @@ evalStandardFunc(
 
 				/* read optional seed value */
 				if (nargs > 1)
+				{
 					if (!coerceToInt(&vargs[1], &seed))
 						return false;
+				}
+				else
+					seed = hash_seed;
 
 				result = (func == PGBENCH_HASH_FNV1A) ?
 					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
