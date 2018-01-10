@@ -2260,6 +2260,7 @@ evalStandardFunc(
 							 vargs[0].type == vargs[1].type &&
 							 vargs[0].u.bval == vargs[1].u.bval);
 				return true;
+			}
 
 			/* hashing */
 		case PGBENCH_HASH_FNV1A:
@@ -2273,13 +2274,6 @@ evalStandardFunc(
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
-
-				if (nargs > 2)
-				{
-					fprintf(stderr,
-							"hash function accepts maximum of two arguments\n");
-					return false;
-				}
 
 				/* read optional seed value */
 				if (nargs > 1)

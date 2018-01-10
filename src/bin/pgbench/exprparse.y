@@ -350,13 +350,13 @@ static const struct
 		"!case_end", -2, PGBENCH_CASE
 	},
 	{
-		"hash", -1, PGBENCH_HASH_MURMUR2
+		"hash", -3, PGBENCH_HASH_MURMUR2
 	},
 	{
-		"hash_murmur2", -1, PGBENCH_HASH_MURMUR2
+		"hash_murmur2", -3, PGBENCH_HASH_MURMUR2
 	},
 	{
-		"hash_fnv1a", -1, PGBENCH_HASH_FNV1A
+		"hash_fnv1a", -3, PGBENCH_HASH_FNV1A
 	},
 	/* keep as last array element */
 	{
@@ -455,6 +455,15 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 		if (len < 3 || len % 2 != 1)
 			expr_yyerror_more(yyscanner, "odd and >= 3 number of arguments expected",
 							  "case control structure");
+	}
+	/* special case: hash functions with optional arguments */
+	if (PGBENCH_FUNCTIONS[fnumber].nargs == -3)
+	{
+		int len = elist_length(args);
+
+		if (len < 1 || len > 2)
+			expr_yyerror_more(yyscanner, "unexpected number of arguments",
+							  PGBENCH_FUNCTIONS[fnumber].fname);
 	}
 
 	expr->etype = ENODE_FUNCTION;
