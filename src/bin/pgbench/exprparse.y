@@ -16,9 +16,9 @@
 
 #include "pgbench.h"
 
-#define PGBENCH_NARGS_VARIABLE (-1)
-#define PGBENCH_NARGS_CASE (-2)
-#define PGBENCH_NARGS_HASH (-3)
+#define PGBENCH_NARGS_VARIABLE	(-1)
+#define PGBENCH_NARGS_CASE		(-2)
+#define PGBENCH_NARGS_HASH		(-3)
 
 PgBenchExpr *expr_parse_result;
 
