@@ -1246,6 +1246,27 @@ pgbench <optional> <replaceable>options</replaceable> </optional> <replaceable>d
        <entry><literal>5</literal></entry>
       </row>
       <row>
+       <entry><literal><function>hash(<replaceable>a</replaceable> [, <replaceable>seed</replaceable> ] )</function></literal></entry>
+       <entry>integer</entry>
+       <entry>alias for <literal>hash_murmur2()</literal></entry>
+       <entry><literal>hash(10, 5432)</literal></entry>
+       <entry><literal>-5817877081768721676</literal></entry>
+      </row>
+      <row>
+       <entry><literal><function>hash_fnv1a(<replaceable>a</replaceable> [, <replaceable>seed</replaceable> ] )</function></literal></entry>
+       <entry>integer</entry>
+       <entry><literal>FNV</literal> hash</entry>
+       <entry><literal>hash_fnv1a(10, 5432)</literal></entry>
+       <entry><literal>-7793829335365542153</literal></entry>
+      </row>
+      <row>
+       <entry><literal><function>hash_murmur2(<replaceable>a</replaceable> [, <replaceable>seed</replaceable> ] )</function></literal></entry>
+       <entry>integer</entry>
+       <entry><literal>murmur2</literal> hash</entry>
+       <entry><literal>hash_murmur2(10, 5432)</literal></entry>
+       <entry><literal>-5817877081768721676</literal></entry>
+      </row>
+      <row>
        <entry><literal><function>int(<replaceable>x</replaceable>)</function></literal></entry>
        <entry>integer</entry>
        <entry>cast to int</entry>
