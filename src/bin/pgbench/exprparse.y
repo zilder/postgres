@@ -16,6 +16,10 @@
 
 #include "pgbench.h"
 
+#define PGBENCH_NARGS_VARIABLE (-1)
+#define PGBENCH_NARGS_CASE (-2)
+#define PGBENCH_NARGS_HASH (-3)
+
 PgBenchExpr *expr_parse_result;
 
 static PgBenchExprList *make_elist(PgBenchExpr *exp, PgBenchExprList *list);
@@ -226,9 +230,13 @@ make_uop(yyscan_t yyscanner, const char *operator, PgBenchExpr *expr)
 /*
  * List of available functions:
  * - fname: function name, "!..." for special internal functions
- * - nargs: number of arguments
- *			-1 is a special value for least & greatest meaning #args >= 1
- *			-2 is for the "CASE WHEN ..." function, which has #args >= 3 and odd
+ * - nargs: number of arguments. Special cases:
+ *			- PGBENCH_NARGS_VARIABLE is a special value for least & greatest
+ *			  meaning #args >= 1;
+ *			- PGBENCH_NARGS_CASE is for the "CASE WHEN ..." function, which
+ *			  has #args >= 3 and odd;
+ * 			- PGBENCH_NARGS_HASH is for hash functions, which have one required
+ *			  and one optional argument;
  * - tag: function identifier from PgBenchFunction enum
  */
 static const struct
@@ -259,10 +267,10 @@ static const struct
 		"abs", 1, PGBENCH_ABS
 	},
 	{
-		"least", -1, PGBENCH_LEAST
+		"least", PGBENCH_NARGS_VARIABLE, PGBENCH_LEAST
 	},
 	{
-		"greatest", -1, PGBENCH_GREATEST
+		"greatest", PGBENCH_NARGS_VARIABLE, PGBENCH_GREATEST
 	},
 	{
 		"debug", 1, PGBENCH_DEBUG
@@ -347,16 +355,16 @@ static const struct
 	},
 	/* "case when ... then ... else ... end" construction */
 	{
-		"!case_end", -2, PGBENCH_CASE
+		"!case_end", PGBENCH_NARGS_CASE, PGBENCH_CASE
 	},
 	{
-		"hash", -3, PGBENCH_HASH_MURMUR2
+		"hash", PGBENCH_NARGS_HASH, PGBENCH_HASH_MURMUR2
 	},
 	{
-		"hash_murmur2", -3, PGBENCH_HASH_MURMUR2
+		"hash_murmur2", PGBENCH_NARGS_HASH, PGBENCH_HASH_MURMUR2
 	},
 	{
-		"hash_fnv1a", -3, PGBENCH_HASH_FNV1A
+		"hash_fnv1a", PGBENCH_NARGS_HASH, PGBENCH_HASH_FNV1A
 	},
 	/* keep as last array element */
 	{
@@ -442,12 +450,12 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 						  PGBENCH_FUNCTIONS[fnumber].fname);
 
 	/* check at least one arg for least & greatest */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == -1 &&
+	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_VARIABLE &&
 		elist_length(args) == 0)
 		expr_yyerror_more(yyscanner, "at least one argument expected",
 						  PGBENCH_FUNCTIONS[fnumber].fname);
 	/* special case: case (when ... then ...)+ (else ...)? end */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == -2)
+	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_CASE)
 	{
 		int len = elist_length(args);
 
@@ -457,7 +465,7 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 							  "case control structure");
 	}
 	/* special case: hash functions with optional arguments */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == -3)
+	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_HASH)
 	{
 		int len = elist_length(args);
 
