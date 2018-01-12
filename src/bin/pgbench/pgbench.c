@@ -447,8 +447,6 @@ static int	num_scripts;		/* number of scripts in sql_script[] */
 static int	num_commands = 0;	/* total number of Command structs */
 static int64 total_weight = 0;
 
-static int hash_seed;			/* default seed used in hash functions */
-
 static int	debug = 0;			/* debug flag */
 
 /* Builtin test scripts */
@@ -2272,19 +2270,13 @@ evalStandardFunc(
 				int64	seed;
 				int64	result;
 
-				Assert(nargs >= 1);
+				Assert(nargs == 2);
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
 
-				/* read optional seed value */
-				if (nargs > 1)
-				{
-					if (!coerceToInt(&vargs[1], &seed))
+				if (!coerceToInt(&vargs[1], &seed))
 						return false;
-				}
-				else
-					seed = hash_seed;
 
 				result = (func == PGBENCH_HASH_FNV1A) ?
 					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
@@ -5136,9 +5128,6 @@ main(int argc, char **argv)
 	/* set random seed */
 	INSTR_TIME_SET_CURRENT(start_time);
 	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
-
-	/* set default seed for hash functions */
-	hash_seed = random();
 
 	/* set up thread data structures */
 	threads = (TState *) pg_malloc(sizeof(TState) * nthreads);

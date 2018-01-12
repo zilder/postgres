@@ -440,38 +440,47 @@ elist_length(PgBenchExprList *list)
 static PgBenchExpr *
 make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 {
+	int len = elist_length(args);
+
 	PgBenchExpr *expr = pg_malloc(sizeof(PgBenchExpr));
 
 	Assert(fnumber >= 0);
 
-	if (PGBENCH_FUNCTIONS[fnumber].nargs >= 0 &&
-		PGBENCH_FUNCTIONS[fnumber].nargs != elist_length(args))
-		expr_yyerror_more(yyscanner, "unexpected number of arguments",
-						  PGBENCH_FUNCTIONS[fnumber].fname);
-
-	/* check at least one arg for least & greatest */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_VARIABLE &&
-		elist_length(args) == 0)
-		expr_yyerror_more(yyscanner, "at least one argument expected",
-						  PGBENCH_FUNCTIONS[fnumber].fname);
-	/* special case: case (when ... then ...)+ (else ...)? end */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_CASE)
+	/* validate arguments number including few special cases */
+	switch (PGBENCH_FUNCTIONS[fnumber].nargs)
 	{
-		int len = elist_length(args);
+		/* check at least one arg for least & greatest */
+		case PGBENCH_NARGS_VARIABLE:
+			if (len == 0)
+				expr_yyerror_more(yyscanner, "at least one argument expected",
+								  PGBENCH_FUNCTIONS[fnumber].fname);
+			break;
 
-		/* 'else' branch is always present, but could be a NULL-constant */
-		if (len < 3 || len % 2 != 1)
-			expr_yyerror_more(yyscanner, "odd and >= 3 number of arguments expected",
-							  "case control structure");
-	}
-	/* special case: hash functions with optional arguments */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == PGBENCH_NARGS_HASH)
-	{
-		int len = elist_length(args);
+		/* case (when ... then ...)+ (else ...)? end */
+		case PGBENCH_NARGS_CASE:
+			/* 'else' branch is always present, but could be a NULL-constant */
+			if (len < 3 || len % 2 != 1)
+				expr_yyerror_more(yyscanner,
+								  "odd and >= 3 number of arguments expected",
+								  "case control structure");
+			break;
 
-		if (len < 1 || len > 2)
+		/* hash functions with optional seed argument */
+		case PGBENCH_NARGS_HASH:
+			if (len < 1 || len > 2)
 			expr_yyerror_more(yyscanner, "unexpected number of arguments",
 							  PGBENCH_FUNCTIONS[fnumber].fname);
+
+			/* if seed argument is missing add random one */
+			if (len == 1)
+				args = make_elist(make_integer_constant(random()), args);
+			break;
+
+		/* common case: positive arguments number */
+		default:
+			if (PGBENCH_FUNCTIONS[fnumber].nargs != len)
+				expr_yyerror_more(yyscanner, "unexpected number of arguments",
+								  PGBENCH_FUNCTIONS[fnumber].fname);
 	}
 
 	expr->etype = ENODE_FUNCTION;
