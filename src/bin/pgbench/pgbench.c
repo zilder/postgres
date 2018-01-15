@@ -192,8 +192,6 @@ char	   *dbName;
 char	   *logfile_prefix = NULL;
 const char *progname;
 
-int			hash_seed;
-
 #define WSEP '@'				/* weight separator */
 
 volatile bool timer_exceeded = false;	/* flag from signal handler */
@@ -2284,7 +2282,15 @@ evalStandardFunc(
 						return false;
 				}
 				else
-					seed = hash_seed;
+				{
+					Variable *var;
+
+					/* read seed from variable */
+					var = lookupVariable(st, "random_seed");
+					Assert(var != NULL);
+					if (!coerceToInt(&var->value, &seed))
+						return false;
+				}
 
 				result = (func == PGBENCH_HASH_FNV1A) ?
 					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
@@ -5138,7 +5144,14 @@ main(int argc, char **argv)
 	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
 
 	/* set default seed for hash functions */
-	hash_seed = random();
+	if (lookupVariable(&state[0], "random_seed") == NULL)
+	{
+		int64 seed = random();
+
+		for (i = 0; i < nclients; i++)
+			if (!putVariableInt(&state[i], "startup", "random_seed", seed))
+				exit(1);
+	}
 
 	/* set up thread data structures */
 	threads = (TState *) pg_malloc(sizeof(TState) * nthreads);
