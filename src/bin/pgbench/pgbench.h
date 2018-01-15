@@ -138,7 +138,6 @@ struct PgBenchExprList
 };
 
 extern PgBenchExpr *expr_parse_result;
-extern int hash_seed;
 
 extern int	expr_yyparse(yyscan_t yyscanner);
 extern int	expr_yylex(union YYSTYPE *lvalp, yyscan_t yyscanner);
