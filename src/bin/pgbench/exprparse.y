@@ -470,10 +470,6 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 			if (len < 1 || len > 2)
 			expr_yyerror_more(yyscanner, "unexpected number of arguments",
 							  PGBENCH_FUNCTIONS[fnumber].fname);
-
-			/* if seed argument isn't provided use the default seed */
-			/*if (len == 1)
-				args = make_elist(make_integer_constant(hash_seed), args);*/
 			break;
 
 		/* common case: positive arguments number */
