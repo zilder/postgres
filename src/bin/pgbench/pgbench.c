@@ -2289,7 +2289,8 @@ evalStandardFunc(
 					var = lookupVariable(st, "random_seed");
 					Assert(var != NULL);
 					if (var->value.type == PGBT_NO_VALUE)
-						makeVariableValue(var);
+						if (!makeVariableValue(var))
+							return false;
 					if (!coerceToInt(&var->value, &seed))
 						return false;
 				}
@@ -5010,6 +5011,10 @@ main(int argc, char **argv)
 	 */
 	main_pid = (int) getpid();
 
+	/* set random seed */
+	INSTR_TIME_SET_CURRENT(start_time);
+	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
+
 	if (nclients > 1)
 	{
 		state = (CState *) pg_realloc(state, sizeof(CState) * nclients);
@@ -5124,6 +5129,16 @@ main(int argc, char **argv)
 		}
 	}
 
+	/* set default seed for hash functions */
+	if (lookupVariable(&state[0], "random_seed") == NULL)
+	{
+		int64 seed = random();
+
+		for (i = 0; i < nclients; i++)
+			if (!putVariableInt(&state[i], "startup", "random_seed", seed))
+				exit(1);
+	}
+
 	if (!is_no_vacuum)
 	{
 		fprintf(stderr, "starting vacuum...");
@@ -5140,20 +5155,6 @@ main(int argc, char **argv)
 		}
 	}
 	PQfinish(con);
-
-	/* set random seed */
-	INSTR_TIME_SET_CURRENT(start_time);
-	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
-
-	/* set default seed for hash functions */
-	if (lookupVariable(&state[0], "random_seed") == NULL)
-	{
-		int64 seed = random();
-
-		for (i = 0; i < nclients; i++)
-			if (!putVariableInt(&state[i], "startup", "random_seed", seed))
-				exit(1);
-	}
 
 	/* set up thread data structures */
 	threads = (TState *) pg_malloc(sizeof(TState) * nthreads);
