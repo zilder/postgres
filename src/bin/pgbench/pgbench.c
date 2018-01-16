@@ -447,8 +447,6 @@ static int	num_scripts;		/* number of scripts in sql_script[] */
 static int	num_commands = 0;	/* total number of Command structs */
 static int64 total_weight = 0;
 
-static int hash_seed;			/* default seed used in hash functions */
-
 static int	debug = 0;			/* debug flag */
 
 /* Builtin test scripts */
