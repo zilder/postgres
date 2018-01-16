@@ -2292,34 +2292,6 @@ evalStandardFunc(
 				return true;
 			}
 
-			/* hashing */
-		case PGBENCH_HASH_FNV1A:
-		case PGBENCH_HASH_MURMUR2:
-			{
-				int64	val;
-				int64	seed;
-				int64	result;
-
-				Assert(nargs >= 1);
-
-				if (!coerceToInt(&vargs[0], &val))
-					return false;
-
-				/* read optional seed value */
-				if (nargs > 1)
-				{
-					if (!coerceToInt(&vargs[1], &seed))
-						return false;
-				}
-				else
-					seed = hash_seed;
-
-				result = (func == PGBENCH_HASH_FNV1A) ?
-					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
-				setIntValue(retval, result);
-				return true;
-			}
-
 		default:
 			/* cannot get here */
 			Assert(0);
