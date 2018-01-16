@@ -2288,6 +2288,8 @@ evalStandardFunc(
 					/* read seed from variable */
 					var = lookupVariable(st, "random_seed");
 					Assert(var != NULL);
+					if (var->value.type == PGBT_NO_VALUE)
+						makeVariableValue(var);
 					if (!coerceToInt(&var->value, &seed))
 						return false;
 				}
