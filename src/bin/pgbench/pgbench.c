@@ -2286,7 +2286,7 @@ evalStandardFunc(
 					Variable *var;
 
 					/* read seed from variable */
-					var = lookupVariable(st, "random_seed");
+					var = lookupVariable(st, "hash_seed");
 					Assert(var != NULL);
 					if (var->value.type == PGBT_NO_VALUE)
 						if (!makeVariableValue(var))
@@ -5103,42 +5103,6 @@ main(int argc, char **argv)
 					scale);
 	}
 
-	/*
-	 * :scale variables normally get -s or database scale, but don't override
-	 * an explicit -D switch
-	 */
-	if (lookupVariable(&state[0], "scale") == NULL)
-	{
-		for (i = 0; i < nclients; i++)
-		{
-			if (!putVariableInt(&state[i], "startup", "scale", scale))
-				exit(1);
-		}
-	}
-
-	/*
-	 * Define a :client_id variable that is unique per connection. But don't
-	 * override an explicit -D switch.
-	 */
-	if (lookupVariable(&state[0], "client_id") == NULL)
-	{
-		for (i = 0; i < nclients; i++)
-		{
-			if (!putVariableInt(&state[i], "startup", "client_id", i))
-				exit(1);
-		}
-	}
-
-	/* set default seed for hash functions */
-	if (lookupVariable(&state[0], "random_seed") == NULL)
-	{
-		int64 seed = random();
-
-		for (i = 0; i < nclients; i++)
-			if (!putVariableInt(&state[i], "startup", "random_seed", seed))
-				exit(1);
-	}
-
 	if (!is_no_vacuum)
 	{
 		fprintf(stderr, "starting vacuum...");
@@ -5180,6 +5144,43 @@ main(int argc, char **argv)
 
 		nclients_dealt += thread->nstate;
 	}
+
+	/*
+	 * :scale variables normally get -s or database scale, but don't override
+	 * an explicit -D switch
+	 */
+	if (lookupVariable(&state[0], "scale") == NULL)
+	{
+		for (i = 0; i < nclients; i++)
+		{
+			if (!putVariableInt(&state[i], "startup", "scale", scale))
+				exit(1);
+		}
+	}
+
+	/*
+	 * Define a :client_id variable that is unique per connection. But don't
+	 * override an explicit -D switch.
+	 */
+	if (lookupVariable(&state[0], "client_id") == NULL)
+	{
+		for (i = 0; i < nclients; i++)
+		{
+			if (!putVariableInt(&state[i], "startup", "client_id", i))
+				exit(1);
+		}
+	}
+
+	/* set default seed for hash functions */
+	if (lookupVariable(&state[0], "hash_seed") == NULL)
+	{
+		int64 seed = getrand(&threads[0], PG_INT64_MIN, PG_INT64_MAX);
+
+		for (i = 0; i < nclients; i++)
+			if (!putVariableInt(&state[i], "startup", "hash_seed", seed))
+				exit(1);
+	}
+
 
 	/* all clients must be assigned to a thread */
 	Assert(nclients_dealt == nclients);

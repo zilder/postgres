@@ -487,15 +487,6 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 				expr_yyerror_more(yyscanner, "unexpected number of arguments",
 								  PGBENCH_FUNCTIONS[fnumber].fname);
 	}
-	/* special case: hash functions with optional arguments */
-	if (PGBENCH_FUNCTIONS[fnumber].nargs == -3)
-	{
-		int len = elist_length(args);
-
-		if (len < 1 || len > 2)
-			expr_yyerror_more(yyscanner, "unexpected number of arguments",
-							  PGBENCH_FUNCTIONS[fnumber].fname);
-	}
 
 	expr->etype = ENODE_FUNCTION;
 	expr->u.function.function = PGBENCH_FUNCTIONS[fnumber].tag;

@@ -884,8 +884,8 @@ pgbench <optional> <replaceable>options</replaceable> </optional> <replaceable>d
       </row>
 
       <row>
-       <entry> <literal>random_seed</literal> </entry>
-       <entry>random seed shared for all sessions</entry>
+       <entry> <literal>hash_seed</literal> </entry>
+       <entry>random seed used in hash functions by default</entry>
       </row>
      </tbody>
     </tgroup>
@@ -1449,18 +1449,18 @@ f(x) = PHI(2.0 * parameter * (x - mu) / (max - min + 1)) /
    </itemizedlist>
 
   <para>
-    Hash functions accepts an input value and optional seed parameter. In case seed isn't provided :random_seed value is used. Hash functions can be used, for example, to modify the distribution of random_zipfian or random_exponential functions in order to obtain scattered distribution. Thus the following listing simulates some possible real world workload typical for social media and blogging platforms where few accounts generates excessive load:
+    Hash functions accepts an input value and an optional seed parameter. In case the seed isn't provided :hash_seed value is used. Hash functions can be used, for example, to modify the distribution of random_zipfian or random_exponential functions in order to obtain scattered distribution. Thus the following pgbench script simulates some possible real world workload typical for social media and blogging platforms where few accounts generate excessive load:
 
 <programlisting>
-\set r random_zipfian(0, 100000, 0.99)
-\set k abs(hash(:r)) % 1000
+\set r random_zipfian(0, 100000000, 1.07)
+\set k abs(hash(:r)) % 1000000
 </programlisting>
 
     In some cases several distinct distributions are needed which don't correlate with each other and this is when implicit seed parameter comes in handy:
 
 <programlisting>
-\set k1 abs(hash(:r), :random_seed + 123) % 1000
-\set k2 abs(hash(:r), :random_seed + 321) % 1000
+\set k1 abs(hash(:r), :hash_seed + 123) % 1000000
+\set k2 abs(hash(:r), :hash_seed + 321) % 1000000
 </programlisting>
   </para>
 
