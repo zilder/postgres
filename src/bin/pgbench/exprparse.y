@@ -476,9 +476,15 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 
 		/* hash functions with optional seed argument */
 		case PGBENCH_NARGS_HASH:
-			if (len < 1 || len > 2)
-			expr_yyerror_more(yyscanner, "unexpected number of arguments",
-							  PGBENCH_FUNCTIONS[fnumber].fname);
+			if (len > 2)
+				expr_yyerror_more(yyscanner, "unexpected number of arguments",
+								  PGBENCH_FUNCTIONS[fnumber].fname);
+
+			if (len == 1)
+			{
+				PgBenchExpr *var = make_variable("hash_seed");
+				args = make_elist(var, args);
+			}
 			break;
 
 		/* common case: positive arguments number */

@@ -2270,30 +2270,13 @@ evalStandardFunc(
 				int64	seed;
 				int64	result;
 
-				Assert(nargs >= 1);
+				Assert(nargs == 2);
 
 				if (!coerceToInt(&vargs[0], &val))
 					return false;
 
-				/* read optional seed value */
-				if (nargs > 1)
-				{
-					if (!coerceToInt(&vargs[1], &seed))
-						return false;
-				}
-				else
-				{
-					Variable *var;
-
-					/* read seed from variable */
-					var = lookupVariable(st, "hash_seed");
-					Assert(var != NULL);
-					if (var->value.type == PGBT_NO_VALUE)
-						if (!makeVariableValue(var))
-							return false;
-					if (!coerceToInt(&var->value, &seed))
-						return false;
-				}
+				if (!coerceToInt(&vargs[1], &seed))
+					return false;
 
 				result = (func == PGBENCH_HASH_FNV1A) ?
 					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
@@ -5011,10 +4994,6 @@ main(int argc, char **argv)
 	 */
 	main_pid = (int) getpid();
 
-	/* set random seed */
-	INSTR_TIME_SET_CURRENT(start_time);
-	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
-
 	if (nclients > 1)
 	{
 		state = (CState *) pg_realloc(state, sizeof(CState) * nclients);
@@ -5068,6 +5047,10 @@ main(int argc, char **argv)
 		exit(1);
 	}
 
+	/* set random seed */
+	INSTR_TIME_SET_CURRENT(start_time);
+	srandom((unsigned int) INSTR_TIME_GET_MICROSEC(start_time));
+
 	if (internal_script_used)
 	{
 		/*
@@ -5101,6 +5084,47 @@ main(int argc, char **argv)
 			fprintf(stderr,
 					"scale option ignored, using count from pgbench_branches table (%d)\n",
 					scale);
+	}
+
+	/*
+	 * :scale variables normally get -s or database scale, but don't override
+	 * an explicit -D switch
+	 */
+	if (lookupVariable(&state[0], "scale") == NULL)
+	{
+		for (i = 0; i < nclients; i++)
+		{
+			if (!putVariableInt(&state[i], "startup", "scale", scale))
+				exit(1);
+		}
+	}
+
+	/*
+	 * Define a :client_id variable that is unique per connection. But don't
+	 * override an explicit -D switch.
+	 */
+	if (lookupVariable(&state[0], "client_id") == NULL)
+	{
+		for (i = 0; i < nclients; i++)
+		{
+			if (!putVariableInt(&state[i], "startup", "client_id", i))
+				exit(1);
+		}
+	}
+
+	/* set default seed for hash functions */
+	if (lookupVariable(&state[0], "hash_seed") == NULL)
+	{
+		uint64		seed;
+
+		seed = (uint64) (random() & 0xFFFF) << 48;
+		seed |= (uint64) (random() & 0xFFFF) << 32;
+		seed |= (uint64) (random() & 0xFFFF) << 16;
+		seed |= (uint64) (random() & 0xFFFF);
+
+		for (i = 0; i < nclients; i++)
+			if (!putVariableInt(&state[i], "startup", "hash_seed", (int64) seed))
+				exit(1);
 	}
 
 	if (!is_no_vacuum)
@@ -5144,43 +5168,6 @@ main(int argc, char **argv)
 
 		nclients_dealt += thread->nstate;
 	}
-
-	/*
-	 * :scale variables normally get -s or database scale, but don't override
-	 * an explicit -D switch
-	 */
-	if (lookupVariable(&state[0], "scale") == NULL)
-	{
-		for (i = 0; i < nclients; i++)
-		{
-			if (!putVariableInt(&state[i], "startup", "scale", scale))
-				exit(1);
-		}
-	}
-
-	/*
-	 * Define a :client_id variable that is unique per connection. But don't
-	 * override an explicit -D switch.
-	 */
-	if (lookupVariable(&state[0], "client_id") == NULL)
-	{
-		for (i = 0; i < nclients; i++)
-		{
-			if (!putVariableInt(&state[i], "startup", "client_id", i))
-				exit(1);
-		}
-	}
-
-	/* set default seed for hash functions */
-	if (lookupVariable(&state[0], "hash_seed") == NULL)
-	{
-		int64 seed = getrand(&threads[0], PG_INT64_MIN, PG_INT64_MAX);
-
-		for (i = 0; i < nclients; i++)
-			if (!putVariableInt(&state[i], "startup", "hash_seed", seed))
-				exit(1);
-	}
-
 
 	/* all clients must be assigned to a thread */
 	Assert(nclients_dealt == nclients);
