@@ -337,7 +337,7 @@ pgbench(
 \set h1 debug(:h0 = hash_murmur2(10, 5432))
 \set h3 debug(hash_fnv1a(10, 5432))
 \set h4 debug(hash(10))
-\set h5 debug(hash(10) = hash(10, :hash_seed))
+\set h5 debug(hash(10) = hash(10, :default_seed))
 -- lazy evaluation
 \set zy 0
 \set yz debug(case when :zy = 0 then -1 else (1 / :zy) end)

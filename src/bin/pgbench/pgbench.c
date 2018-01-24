@@ -2268,7 +2268,6 @@ evalStandardFunc(
 			{
 				int64	val;
 				int64	seed;
-				int64	result;
 
 				Assert(nargs == 2);
 
@@ -2278,9 +2277,13 @@ evalStandardFunc(
 				if (!coerceToInt(&vargs[1], &seed))
 					return false;
 
-				result = (func == PGBENCH_HASH_FNV1A) ?
-					getHashFnv1a(val, seed) : getHashMurmur2(val, seed);
-				setIntValue(retval, result);
+				if (func == PGBENCH_HASH_MURMUR2)
+					setIntValue(retval, getHashMurmur2(val, seed));
+				else if (func == PGBENCH_HASH_FNV1A)
+					setIntValue(retval, getHashFnv1a(val, seed));
+				else
+					Assert(0);
+
 				return true;
 			}
 
@@ -5113,17 +5116,15 @@ main(int argc, char **argv)
 	}
 
 	/* set default seed for hash functions */
-	if (lookupVariable(&state[0], "hash_seed") == NULL)
+	if (lookupVariable(&state[0], "default_seed") == NULL)
 	{
-		uint64		seed;
-
-		seed = (uint64) (random() & 0xFFFF) << 48;
-		seed |= (uint64) (random() & 0xFFFF) << 32;
-		seed |= (uint64) (random() & 0xFFFF) << 16;
-		seed |= (uint64) (random() & 0xFFFF);
+		uint64	seed = ((uint64) (random() & 0xFFFF) << 48) |
+					   ((uint64) (random() & 0xFFFF) << 32) |
+					   ((uint64) (random() & 0xFFFF) << 16) |
+					   (uint64) (random() & 0xFFFF);
 
 		for (i = 0; i < nclients; i++)
-			if (!putVariableInt(&state[i], "startup", "hash_seed", (int64) seed))
+			if (!putVariableInt(&state[i], "startup", "default_seed", (int64) seed))
 				exit(1);
 	}
 
