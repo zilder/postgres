@@ -5118,10 +5118,12 @@ main(int argc, char **argv)
 	/* set default seed for hash functions */
 	if (lookupVariable(&state[0], "default_seed") == NULL)
 	{
-		uint64	seed = ((uint64) (random() & 0xFFFF) << 48) |
-					   ((uint64) (random() & 0xFFFF) << 32) |
-					   ((uint64) (random() & 0xFFFF) << 16) |
-					   (uint64) (random() & 0xFFFF);
+		uint64	seed;
+
+		seed = (uint64) (random() & 0xFFFF) << 48;
+		seed |= (uint64) (random() & 0xFFFF) << 32;
+		seed |= (uint64) (random() & 0xFFFF) << 16;
+		seed |= (uint64) (random() & 0xFFFF);
 
 		for (i = 0; i < nclients; i++)
 			if (!putVariableInt(&state[i], "startup", "default_seed", (int64) seed))
