@@ -489,7 +489,7 @@ make_func(yyscan_t yyscanner, int fnumber, PgBenchExprList *args)
 
 		/* common case: positive arguments number */
 		default:
-			Assert(PGBENCH_FUNCTIONS[fnumber].nargs > 0);
+			Assert(PGBENCH_FUNCTIONS[fnumber].nargs >= 0);
 
 			if (PGBENCH_FUNCTIONS[fnumber].nargs != len)
 				expr_yyerror_more(yyscanner, "unexpected number of arguments",
