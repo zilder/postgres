@@ -880,7 +880,7 @@ pgbench <optional> <replaceable>options</replaceable> </optional> <replaceable>d
 
       <row>
        <entry> <literal>default_seed</literal> </entry>
-       <entry>random seed used in hash functions by default</entry>
+       <entry>seed used in hash functions by default</entry>
       </row>
 
       <row>
@@ -1464,7 +1464,8 @@ f(x) = PHI(2.0 * parameter * (x - mu) / (max - min + 1)) /
 \set k abs(hash(:r)) % 1000000
 </programlisting>
 
-    In some cases several distinct distributions are needed which don't correlate with each other and this is when implicit seed parameter comes in handy:
+    In some cases several distinct distributions are needed which don't correlate
+    with each other and this is when implicit seed parameter comes in handy:
 
 <programlisting>
 \set k1 abs(hash(:r), :default_seed + 123) % 1000000
