@@ -4357,7 +4357,7 @@ RelationGetFKeyList(Relation relation)
  * replication identity index, or InvalidOid if there is no such index.
  */
 List *
-RelationGetIndexList(Relation relation, bool including_global)
+RelationGetIndexList(Relation relation)
 {
 	Relation	indrel;
 	SysScanDesc indscan;
@@ -4453,6 +4453,155 @@ RelationGetIndexList(Relation relation, bool including_global)
 	systable_endscan(indscan);
 
 	heap_close(indrel, AccessShareLock);
+
+	/* Now save a copy of the completed list in the relcache entry. */
+	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
+	oldlist = relation->rd_indexlist;
+	relation->rd_indexlist = list_copy(result);
+	relation->rd_oidindex = oidIndex;
+	relation->rd_pkindex = pkeyIndex;
+	if (replident == REPLICA_IDENTITY_DEFAULT && OidIsValid(pkeyIndex))
+		relation->rd_replidindex = pkeyIndex;
+	else if (replident == REPLICA_IDENTITY_INDEX && OidIsValid(candidateIndex))
+		relation->rd_replidindex = candidateIndex;
+	else
+		relation->rd_replidindex = InvalidOid;
+	relation->rd_indexvalid = 1;
+	MemoryContextSwitchTo(oldcxt);
+
+	/* Don't leak the old list, if there is one */
+	list_free(oldlist);
+
+	return result;
+}
+
+/*
+ * Returns oid list of ancestors
+ */
+static List *
+RelationGetPathToRoot(Oid relid)
+{
+	List *path = NIL;
+
+	do
+	{
+		path = lappend_oid(path, relid);
+		relid = get_partition_parent(relid, true);
+	}
+	while (OidIsValid(relid));
+
+	return path;
+}
+
+List *
+RelationGetWholeIndexList(Relation relation)
+{
+	Relation	indrel;
+	SysScanDesc indscan;
+	ScanKeyData skey;
+	HeapTuple	htup;
+	List	   *result;
+	List	   *oldlist;
+	char		replident = relation->rd_rel->relreplident;
+	Oid			oidIndex = InvalidOid;
+	Oid			pkeyIndex = InvalidOid;
+	Oid			candidateIndex = InvalidOid;
+	MemoryContext oldcxt;
+	List *path = RelationGetPathToRoot(RelationGetRelid(relation));
+	ListCell *lc;
+
+	/* Quick exit if we already computed the list. */
+	/* TODO: separate regular indexes from global ones */
+	// if (relation->rd_indexvalid != 0)
+	// 	return list_copy(relation->rd_indexlist);
+
+	/*
+	 * We build the list we intend to return (in the caller's context) while
+	 * doing the scan.  After successfully completing the scan, we copy that
+	 * list into the relcache entry.  This avoids cache-context memory leakage
+	 * if we get some sort of error partway through.
+	 */
+	result = NIL;
+	oidIndex = InvalidOid;
+
+	foreach (lc, path)
+	{
+		Oid relid = lfirst_oid(lc);
+
+		/* Prepare to scan pg_index for entries having indrelid = this rel. */
+		ScanKeyInit(&skey,
+					Anum_pg_index_indrelid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(relid));
+
+		indrel = heap_open(IndexRelationId, AccessShareLock);
+		indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true,
+									 NULL, 1, &skey);
+
+		while (HeapTupleIsValid(htup = systable_getnext(indscan)))
+		{
+			Form_pg_index index = (Form_pg_index) GETSTRUCT(htup);
+			Datum		indclassDatum;
+			oidvector  *indclass;
+			bool		isnull;
+
+			/*
+			 * Ignore any indexes that are currently being dropped.  This will
+			 * prevent them from being searched, inserted into, or considered in
+			 * HOT-safety decisions.  It's unsafe to touch such an index at all
+			 * since its catalog entries could disappear at any instant.
+			 */
+			if (!IndexIsLive(index))
+				continue;
+
+			/* For ancestor relations only global indexes matter */
+			if (!index->indisglobal && relid != RelationGetRelid(relation))
+				continue;
+
+			/* Add index's OID to result list in the proper order */
+			result = insert_ordered_oid(result, index->indexrelid);
+
+			/*
+			 * indclass cannot be referenced directly through the C struct,
+			 * because it comes after the variable-width indkey field.  Must
+			 * extract the datum the hard way...
+			 */
+			indclassDatum = heap_getattr(htup,
+										 Anum_pg_index_indclass,
+										 GetPgIndexDescriptor(),
+										 &isnull);
+			Assert(!isnull);
+			indclass = (oidvector *) DatumGetPointer(indclassDatum);
+
+			/*
+			 * Invalid, non-unique, non-immediate or predicate indexes aren't
+			 * interesting for either oid indexes or replication identity indexes,
+			 * so don't check them.
+			 */
+			if (!IndexIsValid(index) || !index->indisunique ||
+				!index->indimmediate ||
+				!heap_attisnull(htup, Anum_pg_index_indpred))
+				continue;
+
+			/* Check to see if is a usable btree index on OID */
+			if (index->indnatts == 1 &&
+				index->indkey.values[0] == ObjectIdAttributeNumber &&
+				indclass->values[0] == OID_BTREE_OPS_OID)
+				oidIndex = index->indexrelid;
+
+			/* remember primary key index if any */
+			if (index->indisprimary)
+				pkeyIndex = index->indexrelid;
+
+			/* remember explicitly chosen replica index */
+			if (index->indisreplident)
+				candidateIndex = index->indexrelid;
+		}
+
+		systable_endscan(indscan);
+
+		heap_close(indrel, AccessShareLock);
+	}
 
 	/* Now save a copy of the completed list in the relcache entry. */
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
@@ -4898,7 +5047,8 @@ RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 	 * Get cached list of index OIDs. If we have to start over, we do so here.
 	 */
 restart:
-	indexoidlist = RelationGetIndexList(relation);
+	// indexoidlist = RelationGetIndexList(relation);
+	indexoidlist = RelationGetWholeIndexList(relation);
 
 	/* Fall out if no indexes (but relhasindex was set) */
 	if (indexoidlist == NIL)

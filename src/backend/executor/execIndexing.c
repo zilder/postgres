@@ -181,7 +181,7 @@ ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 	/* TODO */
 	if (!partitionRoot && resultRelInfo->ri_PartitionCheck)
 	{
-		Oid root = get_partition_parent(RelationGetRelid(resultRelation));
+		Oid root = get_partition_parent(RelationGetRelid(resultRelation), false);
 
 		if (OidIsValid(root))
 			resultRelInfo->ri_PartitionRoot = partitionRoot =

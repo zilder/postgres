@@ -1888,6 +1888,31 @@ FormIndexDatum(IndexInfo *indexInfo,
 }
 
 
+static void
+partitions_set_hasindex(Relation pg_class, Oid parent, bool hasindex)
+{
+	List *children = find_inheritance_children(parent, ShareLock);
+	ListCell *lc;
+
+	foreach (lc, children)
+	{
+		Oid			child = lfirst_oid(lc);
+		HeapTuple	tuple;
+		Form_pg_class rd_rel;
+
+		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(child));
+		rd_rel = (Form_pg_class) GETSTRUCT(tuple);
+		if (rd_rel->relhasindex != hasindex)
+		{
+			rd_rel->relhasindex = hasindex;
+			heap_inplace_update(pg_class, tuple);
+		}
+		heap_freetuple(tuple);
+
+		/* TODO: recursive call */
+	}
+}
+
 /*
  * index_update_stats --- update pg_class entry after CREATE INDEX or REINDEX
  *
@@ -1993,6 +2018,9 @@ index_update_stats(Relation rel,
 		rd_rel->relhasindex = hasindex;
 		dirty = true;
 	}
+	if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		partitions_set_hasindex(pg_class, RelationGetRelid(rel), hasindex);
+
 	if (isprimary)
 	{
 		if (!rd_rel->relhaspkey)
@@ -2020,6 +2048,10 @@ index_update_stats(Relation rel,
 				rd_rel->relpages = (int32) relpages;
 				dirty = true;
 			}
+		}
+		else
+		{
+			/* TODO: calculate relpages for partitions? */
 		}
 		if (rd_rel->reltuples != (float4) reltuples)
 		{
