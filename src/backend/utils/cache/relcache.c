@@ -4997,7 +4997,6 @@ RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 	 * Get cached list of index OIDs. If we have to start over, we do so here.
 	 */
 restart:
-	// indexoidlist = RelationGetIndexList(relation);
 	indexoidlist = list_concat(RelationGetIndexList(relation),
 							   RelationGetGlobalIndexList(relation));
 
@@ -5094,7 +5093,6 @@ restart:
 	 * signaling a change in the rel's index list.  If so, we'd better start
 	 * over to ensure we deliver up-to-date attribute bitmaps.
 	 */
-	// newindexoidlist = RelationGetIndexList(relation);
 	newindexoidlist = list_concat(RelationGetIndexList(relation),
 								  RelationGetGlobalIndexList(relation));
 	if (equal(indexoidlist, newindexoidlist) &&
