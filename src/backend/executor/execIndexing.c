@@ -278,6 +278,13 @@ ExecCloseIndices(ResultRelInfo *resultRelInfo)
 		index_close(indexDescs[i], RowExclusiveLock);
 	}
 
+	/* TODO (see ExecOpenIndices) */
+	// if (resultRelInfo->ri_PartitionRoot)
+	// {
+	// 	heap_close(resultRelInfo->ri_PartitionRoot, AccessShareLock);
+	// 	resultRelInfo->ri_PartitionRoot = NULL;
+	// }
+
 	/*
 	 * XXX should free indexInfo array here too?  Currently we assume that
 	 * such stuff will be cleaned up automatically in FreeExecutorState.

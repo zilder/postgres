@@ -4483,18 +4483,21 @@ RelationGetPathToRoot(Oid relid)
 {
 	List *path = NIL;
 
-	do
+	while (true)
 	{
-		path = lappend_oid(path, relid);
 		relid = get_partition_parent(relid, true);
+
+		if (!OidIsValid(relid))
+			break;
+
+		path = lappend_oid(path, relid);
 	}
-	while (OidIsValid(relid));
 
 	return path;
 }
 
 List *
-RelationGetWholeIndexList(Relation relation)
+RelationGetGlobalIndexList(Relation relation)
 {
 	Relation	indrel;
 	SysScanDesc indscan;
@@ -4502,18 +4505,13 @@ RelationGetWholeIndexList(Relation relation)
 	HeapTuple	htup;
 	List	   *result;
 	List	   *oldlist;
-	char		replident = relation->rd_rel->relreplident;
-	Oid			oidIndex = InvalidOid;
-	Oid			pkeyIndex = InvalidOid;
-	Oid			candidateIndex = InvalidOid;
 	MemoryContext oldcxt;
 	List *path = RelationGetPathToRoot(RelationGetRelid(relation));
 	ListCell *lc;
 
 	/* Quick exit if we already computed the list. */
-	/* TODO: separate regular indexes from global ones */
-	// if (relation->rd_indexvalid != 0)
-	// 	return list_copy(relation->rd_indexlist);
+	if (relation->rd_globindexvalid != 0)
+		return list_copy(relation->rd_globindexlist);
 
 	/*
 	 * We build the list we intend to return (in the caller's context) while
@@ -4522,7 +4520,6 @@ RelationGetWholeIndexList(Relation relation)
 	 * if we get some sort of error partway through.
 	 */
 	result = NIL;
-	oidIndex = InvalidOid;
 
 	foreach (lc, path)
 	{
@@ -4541,9 +4538,6 @@ RelationGetWholeIndexList(Relation relation)
 		while (HeapTupleIsValid(htup = systable_getnext(indscan)))
 		{
 			Form_pg_index index = (Form_pg_index) GETSTRUCT(htup);
-			Datum		indclassDatum;
-			oidvector  *indclass;
-			bool		isnull;
 
 			/*
 			 * Ignore any indexes that are currently being dropped.  This will
@@ -4555,47 +4549,11 @@ RelationGetWholeIndexList(Relation relation)
 				continue;
 
 			/* For ancestor relations only global indexes matter */
-			if (!index->indisglobal && relid != RelationGetRelid(relation))
+			if (!index->indisglobal)
 				continue;
 
 			/* Add index's OID to result list in the proper order */
 			result = insert_ordered_oid(result, index->indexrelid);
-
-			/*
-			 * indclass cannot be referenced directly through the C struct,
-			 * because it comes after the variable-width indkey field.  Must
-			 * extract the datum the hard way...
-			 */
-			indclassDatum = heap_getattr(htup,
-										 Anum_pg_index_indclass,
-										 GetPgIndexDescriptor(),
-										 &isnull);
-			Assert(!isnull);
-			indclass = (oidvector *) DatumGetPointer(indclassDatum);
-
-			/*
-			 * Invalid, non-unique, non-immediate or predicate indexes aren't
-			 * interesting for either oid indexes or replication identity indexes,
-			 * so don't check them.
-			 */
-			if (!IndexIsValid(index) || !index->indisunique ||
-				!index->indimmediate ||
-				!heap_attisnull(htup, Anum_pg_index_indpred))
-				continue;
-
-			/* Check to see if is a usable btree index on OID */
-			if (index->indnatts == 1 &&
-				index->indkey.values[0] == ObjectIdAttributeNumber &&
-				indclass->values[0] == OID_BTREE_OPS_OID)
-				oidIndex = index->indexrelid;
-
-			/* remember primary key index if any */
-			if (index->indisprimary)
-				pkeyIndex = index->indexrelid;
-
-			/* remember explicitly chosen replica index */
-			if (index->indisreplident)
-				candidateIndex = index->indexrelid;
 		}
 
 		systable_endscan(indscan);
@@ -4605,17 +4563,9 @@ RelationGetWholeIndexList(Relation relation)
 
 	/* Now save a copy of the completed list in the relcache entry. */
 	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
-	oldlist = relation->rd_indexlist;
-	relation->rd_indexlist = list_copy(result);
-	relation->rd_oidindex = oidIndex;
-	relation->rd_pkindex = pkeyIndex;
-	if (replident == REPLICA_IDENTITY_DEFAULT && OidIsValid(pkeyIndex))
-		relation->rd_replidindex = pkeyIndex;
-	else if (replident == REPLICA_IDENTITY_INDEX && OidIsValid(candidateIndex))
-		relation->rd_replidindex = candidateIndex;
-	else
-		relation->rd_replidindex = InvalidOid;
-	relation->rd_indexvalid = 1;
+	oldlist = relation->rd_globindexlist;
+	relation->rd_globindexlist = list_copy(result);
+	relation->rd_globindexvalid = 1;
 	MemoryContextSwitchTo(oldcxt);
 
 	/* Don't leak the old list, if there is one */
@@ -5048,7 +4998,8 @@ RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 	 */
 restart:
 	// indexoidlist = RelationGetIndexList(relation);
-	indexoidlist = RelationGetWholeIndexList(relation);
+	indexoidlist = list_concat(RelationGetIndexList(relation),
+							   RelationGetGlobalIndexList(relation));
 
 	/* Fall out if no indexes (but relhasindex was set) */
 	if (indexoidlist == NIL)
@@ -5143,7 +5094,9 @@ restart:
 	 * signaling a change in the rel's index list.  If so, we'd better start
 	 * over to ensure we deliver up-to-date attribute bitmaps.
 	 */
-	newindexoidlist = RelationGetIndexList(relation);
+	// newindexoidlist = RelationGetIndexList(relation);
+	newindexoidlist = list_concat(RelationGetIndexList(relation),
+								  RelationGetGlobalIndexList(relation));
 	if (equal(indexoidlist, newindexoidlist) &&
 		relpkindex == relation->rd_pkindex &&
 		relreplindex == relation->rd_replidindex)
