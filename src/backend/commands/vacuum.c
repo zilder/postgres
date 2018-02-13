@@ -1600,7 +1600,8 @@ vac_open_indexes(Relation relation, LOCKMODE lockmode,
 
 	Assert(lockmode != NoLock);
 
-	indexoidlist = RelationGetIndexList(relation);
+	indexoidlist = list_concat(RelationGetIndexList(relation),
+							   RelationGetGlobalIndexList(relation));
 
 	/* allocate enough memory for all indexes */
 	i = list_length(indexoidlist);
