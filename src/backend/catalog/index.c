@@ -1896,20 +1896,24 @@ partitions_set_hasindex(Relation pg_class, Oid parent, bool hasindex)
 
 	foreach (lc, children)
 	{
-		Oid			child = lfirst_oid(lc);
+		Oid			relid = lfirst_oid(lc);
 		HeapTuple	tuple;
 		Form_pg_class rd_rel;
 
-		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(child));
+		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
 		rd_rel = (Form_pg_class) GETSTRUCT(tuple);
 		if (rd_rel->relhasindex != hasindex)
 		{
 			rd_rel->relhasindex = hasindex;
 			heap_inplace_update(pg_class, tuple);
 		}
-		heap_freetuple(tuple);
 
-		/* TODO: recursive call */
+		/* Expand partitioned relations */
+		if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+			children = list_concat(children,
+								   find_inheritance_children(relid, AccessShareLock));
+
+		heap_freetuple(tuple);
 	}
 }
 
@@ -2325,16 +2329,23 @@ IndexBuildHeapScan(Relation heapRelation,
 	}
 	else
 	{
-		List *children;
 		ListCell *lc;
-
-		/* TODO: Make it recursive */
-		children = find_inheritance_children(RelationGetRelid(heapRelation), AccessShareLock);
+		List	 *children = list_make1_oid(RelationGetRelid(heapRelation));
 
 		foreach (lc, children)
 		{
-			Oid childRelid = lfirst_oid(lc);
-			Relation childRel = heap_open(childRelid, AccessShareLock);
+			Oid			childRelid = lfirst_oid(lc);
+			Relation	childRel;
+
+			/* Expand partitioned relations */
+			if (get_rel_relkind(childRelid) == RELKIND_PARTITIONED_TABLE)
+			{
+				children = list_concat(children,
+									   find_inheritance_children(childRelid, AccessShareLock));
+				continue;
+			}
+
+			childRel = heap_open(childRelid, AccessShareLock);
 
 			reltuples += IndexBuildHeapRangeScan(childRel, indexRelation,
 												 indexInfo, allow_sync,
