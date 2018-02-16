@@ -88,6 +88,7 @@ typedef struct IndexScanDescData
 {
 	/* scan parameters */
 	Relation	heapRelation;	/* heap relation descriptor, or NULL */
+	Relation	origHeapRelation; /* original relation if index is global */
 	Relation	indexRelation;	/* index relation descriptor */
 	HTAB	   *heapRelationsMap; /* heap relations hash table (for global index) */
 	Snapshot	xs_snapshot;	/* snapshot to see */

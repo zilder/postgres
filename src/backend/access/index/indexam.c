@@ -130,6 +130,13 @@ static IndexScanDesc index_beginscan_internal(Relation indexRelation,
 						 ParallelIndexScanDesc pscan, bool temp_snap);
 static Oid tuple_extract_relid(IndexScanDesc scan);
 
+typedef struct
+{
+	Oid			relid;
+	Relation	rel;
+	TupleConversionMap *attrmap;
+} partition_info;
+
 
 /* ----------------------------------------------------------------
  *				   index_ interface functions
@@ -230,24 +237,20 @@ index_beginscan(Relation heapRelation,
 
 	scan = index_beginscan_internal(indexRelation, nkeys, norderbys, snapshot, NULL, false);
 
-	// scan->heapRelationsMap = NULL;
 	if (!indexRelation->rd_index->indisglobal)
 		scan->heapRelationsMap = NULL;
 	else
 	{
-		// scan->heapRelationsMap = NULL;
 		HASHCTL		ctl;
-		// MemoryContext oldcxt;
-
-		// oldcxt = MemoryContextSwitchTo(TopTransactionContext);
 
 		memset(&ctl, 0, sizeof(ctl));
 		ctl.keysize = sizeof(Oid);
-		ctl.entrysize = sizeof(Relation);
-		scan->heapRelationsMap = hash_create("index relations", 100, &ctl, HASH_ELEM);
+		ctl.entrysize = sizeof(partition_info);
+
+		scan->heapRelationsMap = hash_create("index relations", 100, &ctl,
+											 HASH_ELEM | HASH_BLOBS);
 
 		scan->xs_want_itup = true;
-		// MemoryContextSwitchTo(oldcxt);
 	}
 
 	/*
@@ -255,6 +258,7 @@ index_beginscan(Relation heapRelation,
 	 * up by RelationGetIndexScan.
 	 */
 	scan->heapRelation = heapRelation;
+	scan->origHeapRelation = heapRelation;
 	scan->xs_snapshot = snapshot;
 
 	return scan;
@@ -378,11 +382,16 @@ index_endscan(IndexScanDesc scan)
 	if (scan->indexRelation->rd_index->indisglobal)
 	{
 		HASH_SEQ_STATUS	status;
-		Relation	   *childRel;
+		partition_info *pinfo;
 
 		hash_seq_init(&status, scan->heapRelationsMap);
-		while ((childRel = (Relation *) hash_seq_search(&status)) != NULL)
-			heap_close(*childRel, AccessShareLock);
+		while ((pinfo = (partition_info *) hash_seq_search(&status)) != NULL)
+		{
+			if (pinfo->attrmap)
+				free_conversion_map(pinfo->attrmap);
+
+			heap_close(pinfo->rel, AccessShareLock);
+		}
 
 		hash_destroy(scan->heapRelationsMap);
 	}
@@ -578,16 +587,20 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	if (found && scan->indexRelation->rd_index->indisglobal)
 	{
 		Oid		relid = tuple_extract_relid(scan);
-		Relation *partRel;
 		bool	exists = false;
+		partition_info *pinfo;
 
-		partRel = hash_search(scan->heapRelationsMap, &relid, HASH_ENTER, &exists);
+		pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_ENTER, &exists);
 		if (!exists)
 		{
 			/* TODO: get appropriate lock */
-			*partRel = heap_open(relid, AccessShareLock);
+			pinfo->relid = relid;
+			pinfo->rel = heap_open(relid, AccessShareLock);
+			pinfo->attrmap = convert_tuples_by_name(RelationGetDescr(pinfo->rel),
+													RelationGetDescr(scan->origHeapRelation),
+													"index_getnext_tid");
 		}
-		scan->heapRelation = *partRel;
+		scan->heapRelation = pinfo->rel;
 	}
 
 	/* Reset kill flag immediately for safety */
@@ -754,7 +767,27 @@ index_getnext(IndexScanDesc scan, ScanDirection direction)
 		 */
 		heapTuple = index_fetch_heap(scan);
 		if (heapTuple != NULL)
+		{
+			/* Convert tuple if we're scanning a global index */
+			if (scan->indexRelation->rd_index->indisglobal)
+			{
+				Oid		relid = tuple_extract_relid(scan);
+				partition_info *pinfo;
+				bool exists;
+
+				pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_FIND, &exists);
+				Assert(exists);
+
+				/* Is conversion required? */
+				if (pinfo->attrmap)
+				{
+					heapTuple = do_convert_tuple(heapTuple, pinfo->attrmap);
+					scan->xs_ctup = *heapTuple;
+				}
+			}
+
 			return heapTuple;
+		}
 	}
 
 	return NULL;				/* failure exit */

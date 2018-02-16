@@ -208,6 +208,41 @@ ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 		if (speculative && ii->ii_Unique)
 			BuildSpeculativeIndexInfo(indexDesc, ii);
 
+		/*
+		 * Build attributes mapping
+		 */
+		if (ii->ii_Global)
+		{
+			/* TODO */
+			AttrNumber *attrmap;
+			Oid indexrelid = IndexGetRelation(indexOid, false);
+			Relation indexrel;
+
+			/*
+			 * Convert index key attribute numbers for result relation.
+			 * Skip the index relation.
+			 */
+			if (indexrelid != RelationGetRelid(resultRelation))
+			{
+				TupleDesc indexrel_desc;
+				TupleDesc resultrel_desc;
+				int k;
+
+				indexrel = heap_open(indexrelid, AccessShareLock);
+				indexrel_desc = RelationGetDescr(indexrel);
+				resultrel_desc = RelationGetDescr(resultRelation);
+
+				attrmap = convert_tuples_by_name_map(resultrel_desc,
+													 indexrel_desc,
+													 "ExecOpenIndices");
+
+				for (k = 0; k < ii->ii_NumIndexAttrs; k++)
+					ii->ii_KeyAttrNumbers[k] = attrmap[ii->ii_KeyAttrNumbers[k] - 1];
+
+				heap_close(indexrel, AccessShareLock);
+			}
+		}
+
 		relationDescs[i] = indexDesc;
 		indexInfoArray[i] = ii;
 		i++;
