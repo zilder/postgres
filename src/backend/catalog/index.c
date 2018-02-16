@@ -2322,8 +2322,8 @@ IndexBuildHeapScan(Relation heapRelation,
 	if (!indexInfo->ii_Global)
 	{
 		reltuples = IndexBuildHeapRangeScan(heapRelation, indexRelation,
-											indexInfo, allow_sync,
-											false,
+											indexInfo, NULL,
+											allow_sync, false,
 											0, InvalidBlockNumber,
 											callback, callback_state);
 	}
@@ -2335,7 +2335,8 @@ IndexBuildHeapScan(Relation heapRelation,
 		foreach (lc, children)
 		{
 			Oid			childRelid = lfirst_oid(lc);
-			Relation	childRel;
+			Relation	childRelation;
+			TupleConversionMap *attrmap;
 
 			/* Expand partitioned relations */
 			if (get_rel_relkind(childRelid) == RELKIND_PARTITIONED_TABLE)
@@ -2345,14 +2346,20 @@ IndexBuildHeapScan(Relation heapRelation,
 				continue;
 			}
 
-			childRel = heap_open(childRelid, AccessShareLock);
+			childRelation = heap_open(childRelid, AccessShareLock);
+			attrmap = convert_tuples_by_name(RelationGetDescr(childRelation),
+											 RelationGetDescr(heapRelation),
+											 "IndexBuildHeapScan");
 
-			reltuples += IndexBuildHeapRangeScan(childRel, indexRelation,
-												 indexInfo, allow_sync,
-												 false,
+			reltuples += IndexBuildHeapRangeScan(childRelation, indexRelation,
+												 indexInfo, attrmap,
+												 allow_sync, false,
 												 0, InvalidBlockNumber,
 												 callback, callback_state);
-			heap_close(childRel, AccessShareLock);
+
+			if (attrmap)
+				free_conversion_map(attrmap);
+			heap_close(childRelation, AccessShareLock);
 		}
 	}
 
@@ -2373,6 +2380,7 @@ double
 IndexBuildHeapRangeScan(Relation heapRelation,
 						Relation indexRelation,
 						IndexInfo *indexInfo,
+						TupleConversionMap *attrmap,
 						bool allow_sync,
 						bool anyvisible,
 						BlockNumber start_blockno,
@@ -2722,8 +2730,16 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
-		/* Set up for predicate or expression evaluation */
-		ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+		/* Do the tuple conversion if required */
+		if (attrmap)
+		{
+			HeapTuple tmpTup = do_convert_tuple(heapTuple, attrmap);
+
+			/* Set up for predicate or expression evaluation */
+			ExecStoreTuple(tmpTup, slot, InvalidBuffer, false);
+		}
+		else
+			ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
 
 		/*
 		 * In a partial index, discard tuples that don't satisfy the

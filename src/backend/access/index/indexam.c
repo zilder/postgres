@@ -389,7 +389,6 @@ index_endscan(IndexScanDesc scan)
 		{
 			if (pinfo->attrmap)
 				free_conversion_map(pinfo->attrmap);
-
 			heap_close(pinfo->rel, AccessShareLock);
 		}
 
