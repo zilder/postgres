@@ -2519,7 +2519,7 @@ IndexBuildHeapScan(Relation heapRelation,
 											indexInfo, NULL,
 											allow_sync, false,
 											0, InvalidBlockNumber,
-											callback, callback_state);
+											callback, callback_state, scan);
 	}
 	else
 	{
@@ -2549,7 +2549,8 @@ IndexBuildHeapScan(Relation heapRelation,
 												 indexInfo, attrmap,
 												 allow_sync, false,
 												 0, InvalidBlockNumber,
-												 callback, callback_state);
+												 callback, callback_state,
+												 scan);
 
 			if (attrmap)
 				free_conversion_map(attrmap);

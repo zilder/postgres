@@ -14306,7 +14306,7 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 		if (!has_superclass(idxid))
 			continue;
 
-		Assert((IndexGetRelation(get_partition_parent(idxid), false) ==
+		Assert((IndexGetRelation(get_partition_parent(idxid, false), false) ==
 			   RelationGetRelid(rel)));
 
 		idx = index_open(idxid, AccessExclusiveLock);
@@ -14435,7 +14435,7 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 
 	/* Silently do nothing if already in the right state */
 	currParent = !has_superclass(partIdxId) ? InvalidOid :
-		get_partition_parent(partIdxId);
+		get_partition_parent(partIdxId, false);
 	if (currParent != RelationGetRelid(parentIdx))
 	{
 		IndexInfo  *childInfo;
@@ -14640,8 +14640,8 @@ validatePartitionedIndex(Relation partedIdx, Relation partedTbl)
 		/* make sure we see the validation we just did */
 		CommandCounterIncrement();
 
-		parentIdxId = get_partition_parent(RelationGetRelid(partedIdx));
-		parentTblId = get_partition_parent(RelationGetRelid(partedTbl));
+		parentIdxId = get_partition_parent(RelationGetRelid(partedIdx), false);
+		parentTblId = get_partition_parent(RelationGetRelid(partedTbl), false);
 		parentIdx = relation_open(parentIdxId, AccessExclusiveLock);
 		parentTbl = relation_open(parentTblId, AccessExclusiveLock);
 		Assert(!parentIdx->rd_index->indisvalid);
