@@ -165,7 +165,9 @@ ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 	/*
 	 * Get cached list of index OIDs
 	 */
-	indexoidlist = RelationGetIndexList(resultRelation);
+	indexoidlist = list_concat(RelationGetIndexList(resultRelation),
+							   RelationGetGlobalIndexList(resultRelation));
+
 	len = list_length(indexoidlist);
 	if (len == 0)
 		return;
@@ -205,6 +207,41 @@ ExecOpenIndices(ResultRelInfo *resultRelInfo, bool speculative)
 		 */
 		if (speculative && ii->ii_Unique)
 			BuildSpeculativeIndexInfo(indexDesc, ii);
+
+		/*
+		 * Build attributes mapping
+		 */
+		if (ii->ii_Global)
+		{
+			/* TODO */
+			AttrNumber *attrmap;
+			Oid indexrelid = IndexGetRelation(indexOid, false);
+			Relation indexrel;
+
+			/*
+			 * Convert index key attribute numbers for result relation.
+			 * Skip the index relation.
+			 */
+			if (indexrelid != RelationGetRelid(resultRelation))
+			{
+				TupleDesc indexrel_desc;
+				TupleDesc resultrel_desc;
+				int k;
+
+				indexrel = heap_open(indexrelid, AccessShareLock);
+				indexrel_desc = RelationGetDescr(indexrel);
+				resultrel_desc = RelationGetDescr(resultRelation);
+
+				attrmap = convert_tuples_by_name_map(resultrel_desc,
+													 indexrel_desc,
+													 "ExecOpenIndices");
+
+				for (k = 0; k < ii->ii_NumIndexAttrs; k++)
+					ii->ii_KeyAttrNumbers[k] = attrmap[ii->ii_KeyAttrNumbers[k] - 1];
+
+				heap_close(indexrel, AccessShareLock);
+			}
+		}
 
 		relationDescs[i] = indexDesc;
 		indexInfoArray[i] = ii;
@@ -354,6 +391,17 @@ ExecInsertIndexTuples(TupleTableSlot *slot,
 					   estate,
 					   values,
 					   isnull);
+
+		/*
+		 * TODO: the same code is in IndexBuildHeapScan(). Probably it should be
+		 * moved to index_form_tuple() or something.
+		 */
+		if (indexInfo->ii_Global)
+		{
+			/* TODO: add separate field for partition relid */
+			values[indexInfo->ii_NumIndexAttrs] = RelationGetRelid(heapRelation);
+			isnull[indexInfo->ii_NumIndexAttrs] = false;
+		}
 
 		/* Check whether to apply noDupErr to this index */
 		applyNoDupErr = noDupErr &&

@@ -279,10 +279,12 @@ StoreIndexTuple(TupleTableSlot *slot, IndexTuple itup, TupleDesc itupdesc)
 	 * number of columns though, as well as being datatype-compatible which is
 	 * something we can't so easily check.
 	 */
-	Assert(slot->tts_tupleDescriptor->natts == nindexatts);
+	/* TODO */
+	// Assert(slot->tts_tupleDescriptor->natts == nindexatts);
 
 	ExecClearTuple(slot);
-	for (i = 0; i < nindexatts; i++)
+	// for (i = 0; i < nindexatts; i++)
+	for (i = 0; i < slot->tts_tupleDescriptor->natts; i++)
 		values[i] = index_getattr(itup, i + 1, itupdesc, &isnull[i]);
 	ExecStoreVirtualTuple(slot);
 }

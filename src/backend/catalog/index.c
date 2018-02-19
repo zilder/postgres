@@ -76,6 +76,8 @@
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
 
+#include "catalog/pg_inherits_fn.h"
+
 
 /* Potentially set by pg_upgrade_support functions */
 Oid			binary_upgrade_next_index_pg_class_oid = InvalidOid;
@@ -125,7 +127,7 @@ static void UpdateIndexRelation(Oid indexoid, Oid heapoid,
 					bool isvalid,
 					bool isready);
 static void index_update_stats(Relation rel,
-				   bool hasindex, bool isprimary,
+				   bool hasindex, bool isprimary, bool isglobal,
 				   double reltuples);
 static void IndexCheckExclusion(Relation heapRelation,
 					Relation indexRelation,
@@ -304,6 +306,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	TupleDesc	indexTupDesc;
 	int			natts;			/* #atts in heap rel --- for error checks */
 	int			i;
+	Form_pg_attribute to;
 
 	/* We need access to the index AM's API struct */
 	amroutine = GetIndexAmRoutineByAmId(accessMethodObjectId, false);
@@ -315,7 +318,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	/*
 	 * allocate the new tuple descriptor
 	 */
-	indexTupDesc = CreateTemplateTupleDesc(numatts, false);
+	indexTupDesc = CreateTemplateTupleDesc(indexInfo->ii_Global ? numatts + 1 : numatts, false);
 
 	/*
 	 * For simple index columns, we copy the pg_attribute row from the parent
@@ -325,11 +328,13 @@ ConstructTupleDescriptor(Relation heapRelation,
 	for (i = 0; i < numatts; i++)
 	{
 		AttrNumber	atnum = indexInfo->ii_KeyAttrNumbers[i];
-		Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
+		// Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
 		HeapTuple	tuple;
 		Form_pg_type typeTup;
 		Form_pg_opclass opclassTup;
 		Oid			keyType;
+
+		to = TupleDescAttr(indexTupDesc, i);
 
 		if (atnum != 0)
 		{
@@ -494,6 +499,35 @@ ConstructTupleDescriptor(Relation heapRelation,
 		}
 	}
 
+	/* Add relid attribute for global index */
+	if (indexInfo->ii_Global)
+	{
+		HeapTuple	tuple;
+		Form_pg_type typeTup;
+
+		to = TupleDescAttr(indexTupDesc, i);
+		MemSet(to, 0, ATTRIBUTE_FIXED_PART_SIZE);
+
+		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(OIDOID));
+		Assert(HeapTupleIsValid(tuple));
+		typeTup = (Form_pg_type) GETSTRUCT(tuple);
+
+		to->attnum = i + 1;
+		to->atttypid = OIDOID;
+		to->attlen = typeTup->typlen;
+		to->attbyval = typeTup->typbyval;
+		to->attstorage = typeTup->typstorage;
+		to->attalign = typeTup->typalign;
+		to->attstattarget = -1;
+		to->attcacheoff = -1;
+		to->atttypmod = typeTup->typtypmod;
+		to->attislocal = true;
+		to->attcollation = InvalidOid;
+		namestrcpy(&to->attname, "relid");
+
+		ReleaseSysCache(tuple);
+	}
+
 	pfree(amroutine);
 
 	return indexTupDesc;
@@ -591,17 +625,41 @@ UpdateIndexRelation(Oid indexoid,
 	Relation	pg_index;
 	HeapTuple	tuple;
 	int			i;
+	int			numatts = indexInfo->ii_NumIndexAttrs;
+	int			extra_atts = indexInfo->ii_Global ? 1 : 0;
 
 	/*
 	 * Copy the index key, opclass, and indoption info into arrays (should we
 	 * make the caller pass them like this to start with?)
 	 */
-	indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
-	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
+	// for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// 	indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
+	// indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
+	// indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
+	// indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+
+	indkey = buildint2vector(NULL, numatts + extra_atts);
+	for (i = 0; i < numatts; i++)
 		indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
-	indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
-	indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
-	indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+
+	indcollation = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indcollation->values, collationOids, numatts * sizeof(Oid));
+
+	indclass = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indclass->values, classOids, numatts * sizeof(Oid));
+
+	indoption = buildint2vector(NULL, numatts + extra_atts);
+	memcpy(indoption->values, coloptions, numatts * sizeof(int16));
+
+	if (extra_atts)
+	{
+		/* TODO */
+		indkey->values[numatts] = 0;
+		indcollation->values[numatts] = 0;
+		indoption->values[numatts] = 0;
+		indclass->values[numatts] = OID_BTREE_OPS_OID;
+	}
 
 	/*
 	 * Convert the index expressions (if any) to a text datum
@@ -646,6 +704,7 @@ UpdateIndexRelation(Oid indexoid,
 	values[Anum_pg_index_indrelid - 1] = ObjectIdGetDatum(heapoid);
 	values[Anum_pg_index_indnatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexAttrs);
 	values[Anum_pg_index_indisunique - 1] = BoolGetDatum(indexInfo->ii_Unique);
+	values[Anum_pg_index_indisglobal - 1] = BoolGetDatum(indexInfo->ii_Global);
 	values[Anum_pg_index_indisprimary - 1] = BoolGetDatum(primary);
 	values[Anum_pg_index_indisexclusion - 1] = BoolGetDatum(isexclusion);
 	values[Anum_pg_index_indimmediate - 1] = BoolGetDatum(immediate);
@@ -935,13 +994,13 @@ index_create(Relation heapRelation,
 	 * index relation's tuple descriptor
 	 */
 	InitializeAttributeOids(indexRelation,
-							indexInfo->ii_NumIndexAttrs,
+							indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0),
 							indexRelationId);
 
 	/*
 	 * append ATTRIBUTE tuples for the index
 	 */
-	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs);
+	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0));
 
 	/* ----------------
 	 *	  update pg_index
@@ -1154,6 +1213,7 @@ index_create(Relation heapRelation,
 		index_update_stats(heapRelation,
 						   true,
 						   isprimary,
+						   indexInfo->ii_Global,
 						   -1.0);
 		/* Make the above update visible */
 		CommandCounterIncrement();
@@ -1337,6 +1397,7 @@ index_constraint_create(Relation heapRelation,
 		index_update_stats(heapRelation,
 						   true,
 						   true,
+						   indexInfo->ii_Global,
 						   -1.0);
 
 	/*
@@ -1739,6 +1800,7 @@ BuildIndexInfo(Relation index)
 
 	/* other info */
 	ii->ii_Unique = indexStruct->indisunique;
+	ii->ii_Global = indexStruct->indisglobal;
 	ii->ii_ReadyForInserts = IndexIsReady(indexStruct);
 	/* assume not doing speculative insertion for now */
 	ii->ii_UniqueOps = NULL;
@@ -1993,6 +2055,35 @@ FormIndexDatum(IndexInfo *indexInfo,
 }
 
 
+static void
+partitions_set_hasindex(Relation pg_class, Oid parent, bool hasindex)
+{
+	List *children = find_inheritance_children(parent, ShareLock);
+	ListCell *lc;
+
+	foreach (lc, children)
+	{
+		Oid			relid = lfirst_oid(lc);
+		HeapTuple	tuple;
+		Form_pg_class rd_rel;
+
+		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
+		rd_rel = (Form_pg_class) GETSTRUCT(tuple);
+		if (rd_rel->relhasindex != hasindex)
+		{
+			rd_rel->relhasindex = hasindex;
+			heap_inplace_update(pg_class, tuple);
+		}
+
+		/* Expand partitioned relations */
+		if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+			children = list_concat(children,
+								   find_inheritance_children(relid, AccessShareLock));
+
+		heap_freetuple(tuple);
+	}
+}
+
 /*
  * index_update_stats --- update pg_class entry after CREATE INDEX or REINDEX
  *
@@ -2019,6 +2110,7 @@ static void
 index_update_stats(Relation rel,
 				   bool hasindex,
 				   bool isprimary,
+				   bool isglobal,
 				   double reltuples)
 {
 	Oid			relid = RelationGetRelid(rel);
@@ -2100,6 +2192,9 @@ index_update_stats(Relation rel,
 		rd_rel->relhasindex = hasindex;
 		dirty = true;
 	}
+	if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		partitions_set_hasindex(pg_class, RelationGetRelid(rel), hasindex);
+
 	if (isprimary)
 	{
 		if (!rd_rel->relhaspkey)
@@ -2111,7 +2206,6 @@ index_update_stats(Relation rel,
 
 	if (reltuples >= 0)
 	{
-		BlockNumber relpages = RelationGetNumberOfBlocks(rel);
 		BlockNumber relallvisible;
 
 		if (rd_rel->relkind != RELKIND_INDEX)
@@ -2119,10 +2213,19 @@ index_update_stats(Relation rel,
 		else					/* don't bother for indexes */
 			relallvisible = 0;
 
-		if (rd_rel->relpages != (int32) relpages)
+		if (!isglobal)
 		{
-			rd_rel->relpages = (int32) relpages;
-			dirty = true;
+			BlockNumber relpages = RelationGetNumberOfBlocks(rel);
+
+			if (rd_rel->relpages != (int32) relpages)
+			{
+				rd_rel->relpages = (int32) relpages;
+				dirty = true;
+			}
+		}
+		else
+		{
+			/* TODO: calculate relpages for partitions? */
 		}
 		if (rd_rel->reltuples != (float4) reltuples)
 		{
@@ -2314,15 +2417,47 @@ index_build(Relation heapRelation,
 	/*
 	 * Update heap and index pg_class rows
 	 */
+	// if (!indexInfo->ii_Global)
+	// {
+	// 	index_update_stats(heapRelation,
+	// 					   true,
+	// 					   isprimary,
+	// 					   stats->heap_tuples);
+	// }
+	// else
+	// {
+	// 	List *children;
+	// 	ListCell *lc;
+
+	// 	children = find_inheritance_children(RelationGetRelid(heapRelation),
+	// 										 AccessShareLock);
+	// 	foreach (lc, children)
+	// 	{
+	// 		Oid childRelid = lfirst_oid(lc);
+	// 		Relation childRel;
+
+	// 		childRel = heap_open(childRelid, AccessShareLock);
+	// 		/* TODO: Collect separate heap_tuples for each child */
+	// 		index_update_stats(childRel,
+	// 					   true,
+	// 					   isprimary,
+	// 					   stats->heap_tuples);
+	// 		heap_close(childRel, AccessShareLock);
+	// 	}
+	// }
+
 	index_update_stats(heapRelation,
 					   true,
 					   isprimary,
+					   indexInfo->ii_Global,
 					   stats->heap_tuples);
 
 	index_update_stats(indexRelation,
-					   false,
-					   false,
-					   stats->index_tuples);
+				   false,
+				   false,
+				   false,
+				   stats->index_tuples);
+
 
 	/* Make the updated catalog row versions visible */
 	CommandCounterIncrement();
@@ -2376,11 +2511,53 @@ IndexBuildHeapScan(Relation heapRelation,
 				   void *callback_state,
 				   HeapScanDesc scan)
 {
-	return IndexBuildHeapRangeScan(heapRelation, indexRelation,
-								   indexInfo, allow_sync,
-								   false,
-								   0, InvalidBlockNumber,
-								   callback, callback_state, scan);
+	double reltuples = 0;
+
+	if (!indexInfo->ii_Global)
+	{
+		reltuples = IndexBuildHeapRangeScan(heapRelation, indexRelation,
+											indexInfo, NULL,
+											allow_sync, false,
+											0, InvalidBlockNumber,
+											callback, callback_state);
+	}
+	else
+	{
+		ListCell *lc;
+		List	 *children = list_make1_oid(RelationGetRelid(heapRelation));
+
+		foreach (lc, children)
+		{
+			Oid			childRelid = lfirst_oid(lc);
+			Relation	childRelation;
+			TupleConversionMap *attrmap;
+
+			/* Expand partitioned relations */
+			if (get_rel_relkind(childRelid) == RELKIND_PARTITIONED_TABLE)
+			{
+				children = list_concat(children,
+									   find_inheritance_children(childRelid, AccessShareLock));
+				continue;
+			}
+
+			childRelation = heap_open(childRelid, AccessShareLock);
+			attrmap = convert_tuples_by_name(RelationGetDescr(childRelation),
+											 RelationGetDescr(heapRelation),
+											 "IndexBuildHeapScan");
+
+			reltuples += IndexBuildHeapRangeScan(childRelation, indexRelation,
+												 indexInfo, attrmap,
+												 allow_sync, false,
+												 0, InvalidBlockNumber,
+												 callback, callback_state);
+
+			if (attrmap)
+				free_conversion_map(attrmap);
+			heap_close(childRelation, AccessShareLock);
+		}
+	}
+
+	return reltuples;
 }
 
 /*
@@ -2397,6 +2574,7 @@ double
 IndexBuildHeapRangeScan(Relation heapRelation,
 						Relation indexRelation,
 						IndexInfo *indexInfo,
+						TupleConversionMap *attrmap,
 						bool allow_sync,
 						bool anyvisible,
 						BlockNumber start_blockno,
@@ -2779,8 +2957,16 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
-		/* Set up for predicate or expression evaluation */
-		ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+		/* Do the tuple conversion if required */
+		if (attrmap)
+		{
+			HeapTuple tmpTup = do_convert_tuple(heapTuple, attrmap);
+
+			/* Set up for predicate or expression evaluation */
+			ExecStoreTuple(tmpTup, slot, InvalidBuffer, false);
+		}
+		else
+			ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
 
 		/*
 		 * In a partial index, discard tuples that don't satisfy the
@@ -2802,6 +2988,14 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 					   estate,
 					   values,
 					   isnull);
+
+		/* TODO: move following code to FormIndexDatum */
+		/* Set heap relid for global index */
+		if (indexInfo->ii_Global)
+		{
+			values[indexInfo->ii_NumIndexAttrs] = heapRelation->rd_id;
+			isnull[indexInfo->ii_NumIndexAttrs] = false;
+		}
 
 		/*
 		 * You'd think we should go ahead and build the index tuple here, but
@@ -3525,6 +3719,28 @@ IndexGetRelation(Oid indexId, bool missing_ok)
 	Assert(index->indexrelid == indexId);
 
 	result = index->indrelid;
+	ReleaseSysCache(tuple);
+	return result;
+}
+
+bool
+IndexIsGlobal(Oid indexId, bool missing_ok)
+{
+	HeapTuple	tuple;
+	Form_pg_index index;
+	bool		result;
+
+	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexId));
+	if (!HeapTupleIsValid(tuple))
+	{
+		if (missing_ok)
+			return InvalidOid;
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+	}
+	index = (Form_pg_index) GETSTRUCT(tuple);
+	Assert(index->indexrelid == indexId);
+
+	result = index->indisglobal;
 	ReleaseSysCache(tuple);
 	return result;
 }

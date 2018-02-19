@@ -1382,7 +1382,7 @@ check_default_allows_bound(Relation parent, Relation default_rel,
  * when it is known that the relation is a partition.
  */
 Oid
-get_partition_parent(Oid relid)
+get_partition_parent(Oid relid, bool missing_ok)
 {
 	Form_pg_inherits form;
 	Relation	catalogRelation;
@@ -1407,10 +1407,17 @@ get_partition_parent(Oid relid)
 
 	tuple = systable_getnext(scan);
 	if (!HeapTupleIsValid(tuple))
-		elog(ERROR, "could not find tuple for parent of relation %u", relid);
-
-	form = (Form_pg_inherits) GETSTRUCT(tuple);
-	result = form->inhparent;
+	{
+		if (!missing_ok)
+			elog(ERROR, "could not find tuple for parent of relation %u", relid);
+		else
+			result = 0;
+	}
+	else
+	{
+		form = (Form_pg_inherits) GETSTRUCT(tuple);
+		result = form->inhparent;
+	}
 
 	systable_endscan(scan);
 	heap_close(catalogRelation, AccessShareLock);
@@ -2498,7 +2505,7 @@ generate_partition_qual(Relation rel)
 		return copyObject(rel->rd_partcheck);
 
 	/* Grab at least an AccessShareLock on the parent table */
-	parent = heap_open(get_partition_parent(RelationGetRelid(rel)),
+	parent = heap_open(get_partition_parent(RelationGetRelid(rel), false),
 					   AccessShareLock);
 
 	/* Get pg_class.relpartbound */

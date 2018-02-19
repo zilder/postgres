@@ -1289,7 +1289,7 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
 	 */
 	if (is_partition && relOid != oldRelOid)
 	{
-		state->partParentOid = get_partition_parent(relOid);
+		state->partParentOid = get_partition_parent(relOid, false);
 		if (OidIsValid(state->partParentOid))
 			LockRelationOid(state->partParentOid, AccessExclusiveLock);
 	}
@@ -5840,7 +5840,7 @@ ATExecDropNotNull(Relation rel, const char *colName, LOCKMODE lockmode)
 	/* If rel is partition, shouldn't drop NOT NULL if parent has the same */
 	if (rel->rd_rel->relispartition)
 	{
-		Oid			parentId = get_partition_parent(RelationGetRelid(rel));
+		Oid			parentId = get_partition_parent(RelationGetRelid(rel), false);
 		Relation	parent = heap_open(parentId, AccessShareLock);
 		TupleDesc	tupDesc = RelationGetDescr(parent);
 		AttrNumber	parent_attnum;

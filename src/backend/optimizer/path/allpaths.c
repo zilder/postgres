@@ -429,6 +429,18 @@ set_rel_pathlist(PlannerInfo *root, RelOptInfo *rel,
 	}
 	else if (rte->inh)
 	{
+		ListCell *lc;
+
+		foreach(lc, rel->indexlist)
+		{
+			IndexOptInfo *index = (IndexOptInfo *) lfirst(lc);
+
+			index->indrestrictinfo = rel->baserestrictinfo;
+		}
+
+		/* Consider global index scans */
+		create_index_paths(root, rel);
+
 		/* It's an "append relation", process accordingly */
 		set_append_rel_pathlist(root, rel, rti, rte);
 	}

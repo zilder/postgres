@@ -82,6 +82,8 @@
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
 
+#include "utils/memutils.h"
+
 
 /* ----------------------------------------------------------------
  *					macros used in index_ routines
@@ -126,6 +128,14 @@ do { \
 static IndexScanDesc index_beginscan_internal(Relation indexRelation,
 						 int nkeys, int norderbys, Snapshot snapshot,
 						 ParallelIndexScanDesc pscan, bool temp_snap);
+static Oid tuple_extract_relid(IndexScanDesc scan);
+
+typedef struct
+{
+	Oid			relid;
+	Relation	rel;
+	TupleConversionMap *attrmap;
+} partition_info;
 
 
 /* ----------------------------------------------------------------
@@ -228,11 +238,28 @@ index_beginscan(Relation heapRelation,
 
 	scan = index_beginscan_internal(indexRelation, nkeys, norderbys, snapshot, NULL, false);
 
+	if (!indexRelation->rd_index->indisglobal)
+		scan->heapRelationsMap = NULL;
+	else
+	{
+		HASHCTL		ctl;
+
+		memset(&ctl, 0, sizeof(ctl));
+		ctl.keysize = sizeof(Oid);
+		ctl.entrysize = sizeof(partition_info);
+
+		scan->heapRelationsMap = hash_create("index relations", 100, &ctl,
+											 HASH_ELEM | HASH_BLOBS);
+
+		scan->xs_want_itup = true;
+	}
+
 	/*
 	 * Save additional parameters into the scandesc.  Everything else was set
 	 * up by RelationGetIndexScan.
 	 */
 	scan->heapRelation = heapRelation;
+	scan->origHeapRelation = heapRelation;
 	scan->xs_snapshot = snapshot;
 
 	return scan;
@@ -352,6 +379,22 @@ index_endscan(IndexScanDesc scan)
 
 	/* End the AM's scan */
 	scan->indexRelation->rd_amroutine->amendscan(scan);
+
+	if (scan->indexRelation->rd_index->indisglobal)
+	{
+		HASH_SEQ_STATUS	status;
+		partition_info *pinfo;
+
+		hash_seq_init(&status, scan->heapRelationsMap);
+		while ((pinfo = (partition_info *) hash_seq_search(&status)) != NULL)
+		{
+			if (pinfo->attrmap)
+				free_conversion_map(pinfo->attrmap);
+			heap_close(pinfo->rel, AccessShareLock);
+		}
+
+		hash_destroy(scan->heapRelationsMap);
+	}
 
 	/* Release index refcount acquired by index_beginscan */
 	RelationDecrementReferenceCount(scan->indexRelation);
@@ -541,6 +584,25 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	 */
 	found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
 
+	if (found && scan->indexRelation->rd_index->indisglobal)
+	{
+		Oid		relid = tuple_extract_relid(scan);
+		bool	exists = false;
+		partition_info *pinfo;
+
+		pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_ENTER, &exists);
+		if (!exists)
+		{
+			/* TODO: get appropriate lock */
+			pinfo->relid = relid;
+			pinfo->rel = heap_open(relid, AccessShareLock);
+			pinfo->attrmap = convert_tuples_by_name(RelationGetDescr(pinfo->rel),
+													RelationGetDescr(scan->origHeapRelation),
+													"index_getnext_tid");
+		}
+		scan->heapRelation = pinfo->rel;
+	}
+
 	/* Reset kill flag immediately for safety */
 	scan->kill_prior_tuple = false;
 
@@ -560,6 +622,20 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 
 	/* Return the TID of the tuple we found. */
 	return &scan->xs_ctup.t_self;
+}
+
+static Oid
+tuple_extract_relid(IndexScanDesc scan)
+{
+	TupleDesc	desc = scan->indexRelation->rd_att;
+	bool		isnull;
+	Datum		relid;
+
+	/* Heap relid is stored in the last attribute */
+	relid = index_getattr(scan->xs_itup, desc->natts, desc, &isnull);
+	Assert(!isnull);
+
+	return DatumGetObjectId(relid);
 }
 
 /* ----------------
@@ -691,7 +767,27 @@ index_getnext(IndexScanDesc scan, ScanDirection direction)
 		 */
 		heapTuple = index_fetch_heap(scan);
 		if (heapTuple != NULL)
+		{
+			/* Convert tuple if we're scanning a global index */
+			if (scan->indexRelation->rd_index->indisglobal)
+			{
+				Oid		relid = tuple_extract_relid(scan);
+				partition_info *pinfo;
+				bool exists;
+
+				pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_FIND, &exists);
+				Assert(exists);
+
+				/* Is conversion required? */
+				if (pinfo->attrmap)
+				{
+					heapTuple = do_convert_tuple(heapTuple, pinfo->attrmap);
+					scan->xs_ctup = *heapTuple;
+				}
+			}
+
 			return heapTuple;
+		}
 	}
 
 	return NULL;				/* failure exit */

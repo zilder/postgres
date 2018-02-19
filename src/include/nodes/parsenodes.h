@@ -2721,6 +2721,7 @@ typedef struct IndexStmt
 	Oid			indexOid;		/* OID of an existing index, if any */
 	Oid			oldNode;		/* relfilenode of existing storage, if any */
 	bool		unique;			/* is index unique? */
+	bool		global;			/* is index global? */
 	bool		primary;		/* is index a primary key? */
 	bool		isconstraint;	/* is it for a pkey/unique constraint? */
 	bool		deferrable;		/* is the constraint DEFERRABLE? */

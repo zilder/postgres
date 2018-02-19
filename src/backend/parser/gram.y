@@ -436,7 +436,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
 %type <node>	overlay_placing substr_from substr_for
 
 %type <boolean> opt_instead
-%type <boolean> opt_unique opt_concurrently opt_verbose opt_full
+%type <boolean> opt_unique opt_global opt_concurrently opt_verbose opt_full
 %type <boolean> opt_freeze opt_analyze opt_default opt_recheck
 %type <defelt>	opt_binary opt_oids copy_delimiter
 
@@ -7360,7 +7360,7 @@ defacl_privilege_target:
 
 IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 			ON relation_expr access_method_clause '(' index_params ')'
-			opt_reloptions OptTableSpace where_clause
+			opt_global opt_reloptions OptTableSpace where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
@@ -7370,9 +7370,10 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->relationId = InvalidOid;
 					n->accessMethod = $8;
 					n->indexParams = $10;
-					n->options = $12;
-					n->tableSpace = $13;
-					n->whereClause = $14;
+					n->global = $12;
+					n->options = $13;
+					n->tableSpace = $14;
+					n->whereClause = $15;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -7387,7 +7388,7 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 				}
 			| CREATE opt_unique INDEX opt_concurrently IF_P NOT EXISTS index_name
 			ON relation_expr access_method_clause '(' index_params ')'
-			opt_reloptions OptTableSpace where_clause
+			opt_global opt_reloptions OptTableSpace where_clause
 				{
 					IndexStmt *n = makeNode(IndexStmt);
 					n->unique = $2;
@@ -7397,9 +7398,10 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 					n->relationId = InvalidOid;
 					n->accessMethod = $11;
 					n->indexParams = $13;
-					n->options = $15;
-					n->tableSpace = $16;
-					n->whereClause = $17;
+					n->global = $15;
+					n->options = $16;
+					n->tableSpace = $17;
+					n->whereClause = $18;
 					n->excludeOpNames = NIL;
 					n->idxcomment = NULL;
 					n->indexOid = InvalidOid;
@@ -7416,6 +7418,11 @@ IndexStmt:	CREATE opt_unique INDEX opt_concurrently opt_index_name
 
 opt_unique:
 			UNIQUE									{ $$ = true; }
+			| /*EMPTY*/								{ $$ = false; }
+		;
+
+opt_global:
+			GLOBAL									{ $$ = true; }
 			| /*EMPTY*/								{ $$ = false; }
 		;
 

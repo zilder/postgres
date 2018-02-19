@@ -51,7 +51,7 @@ extern PartitionBoundInfo partition_bounds_copy(PartitionBoundInfo src,
 
 extern void check_new_partition_bound(char *relname, Relation parent,
 						  PartitionBoundSpec *spec);
-extern Oid	get_partition_parent(Oid relid);
+extern Oid	get_partition_parent(Oid relid, bool missing_ok);
 extern List *get_qual_from_partbound(Relation rel, Relation parent,
 						PartitionBoundSpec *spec);
 extern List *map_partition_varattnos(List *expr, int fromrel_varno,

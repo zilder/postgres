@@ -1521,7 +1521,7 @@ RelationInitIndexAccessInfo(Relation relation)
 	ReleaseSysCache(tuple);
 
 	natts = relation->rd_rel->relnatts;
-	if (natts != relation->rd_index->indnatts)
+	if (natts != relation->rd_index->indnatts + (relation->rd_index->indisglobal ? 1 : 0))
 		elog(ERROR, "relnatts disagrees with indnatts for index %u",
 			 RelationGetRelid(relation));
 
@@ -4445,6 +4445,105 @@ RelationGetIndexList(Relation relation)
 }
 
 /*
+ * Returns oid list of ancestors
+ */
+static List *
+RelationGetPathToRoot(Oid relid)
+{
+	List *path = NIL;
+
+	while (true)
+	{
+		relid = get_partition_parent(relid, true);
+
+		if (!OidIsValid(relid))
+			break;
+
+		path = lappend_oid(path, relid);
+	}
+
+	return path;
+}
+
+List *
+RelationGetGlobalIndexList(Relation relation)
+{
+	Relation	indrel;
+	SysScanDesc indscan;
+	ScanKeyData skey;
+	HeapTuple	htup;
+	List	   *result;
+	List	   *oldlist;
+	MemoryContext oldcxt;
+	List *path = RelationGetPathToRoot(RelationGetRelid(relation));
+	ListCell *lc;
+
+	/* Quick exit if we already computed the list. */
+	if (relation->rd_globindexvalid != 0)
+		return list_copy(relation->rd_globindexlist);
+
+	/*
+	 * We build the list we intend to return (in the caller's context) while
+	 * doing the scan.  After successfully completing the scan, we copy that
+	 * list into the relcache entry.  This avoids cache-context memory leakage
+	 * if we get some sort of error partway through.
+	 */
+	result = NIL;
+
+	foreach (lc, path)
+	{
+		Oid relid = lfirst_oid(lc);
+
+		/* Prepare to scan pg_index for entries having indrelid = this rel. */
+		ScanKeyInit(&skey,
+					Anum_pg_index_indrelid,
+					BTEqualStrategyNumber, F_OIDEQ,
+					ObjectIdGetDatum(relid));
+
+		indrel = heap_open(IndexRelationId, AccessShareLock);
+		indscan = systable_beginscan(indrel, IndexIndrelidIndexId, true,
+									 NULL, 1, &skey);
+
+		while (HeapTupleIsValid(htup = systable_getnext(indscan)))
+		{
+			Form_pg_index index = (Form_pg_index) GETSTRUCT(htup);
+
+			/*
+			 * Ignore any indexes that are currently being dropped.  This will
+			 * prevent them from being searched, inserted into, or considered in
+			 * HOT-safety decisions.  It's unsafe to touch such an index at all
+			 * since its catalog entries could disappear at any instant.
+			 */
+			if (!IndexIsLive(index))
+				continue;
+
+			/* For ancestor relations only global indexes matter */
+			if (!index->indisglobal)
+				continue;
+
+			/* Add index's OID to result list in the proper order */
+			result = insert_ordered_oid(result, index->indexrelid);
+		}
+
+		systable_endscan(indscan);
+
+		heap_close(indrel, AccessShareLock);
+	}
+
+	/* Now save a copy of the completed list in the relcache entry. */
+	oldcxt = MemoryContextSwitchTo(CacheMemoryContext);
+	oldlist = relation->rd_globindexlist;
+	relation->rd_globindexlist = list_copy(result);
+	relation->rd_globindexvalid = 1;
+	MemoryContextSwitchTo(oldcxt);
+
+	/* Don't leak the old list, if there is one */
+	list_free(oldlist);
+
+	return result;
+}
+
+/*
  * RelationGetStatExtList
  *		get a list of OIDs of statistics objects on this relation
  *
@@ -4867,7 +4966,8 @@ RelationGetIndexAttrBitmap(Relation relation, IndexAttrBitmapKind attrKind)
 	 * Get cached list of index OIDs. If we have to start over, we do so here.
 	 */
 restart:
-	indexoidlist = RelationGetIndexList(relation);
+	indexoidlist = list_concat(RelationGetIndexList(relation),
+							   RelationGetGlobalIndexList(relation));
 
 	/* Fall out if no indexes (but relhasindex was set) */
 	if (indexoidlist == NIL)
@@ -4962,7 +5062,8 @@ restart:
 	 * signaling a change in the rel's index list.  If so, we'd better start
 	 * over to ensure we deliver up-to-date attribute bitmaps.
 	 */
-	newindexoidlist = RelationGetIndexList(relation);
+	newindexoidlist = list_concat(RelationGetIndexList(relation),
+								  RelationGetGlobalIndexList(relation));
 	if (equal(indexoidlist, newindexoidlist) &&
 		relpkindex == relation->rd_pkindex &&
 		relreplindex == relation->rd_replidindex)

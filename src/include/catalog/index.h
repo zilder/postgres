@@ -117,6 +117,7 @@ extern double IndexBuildHeapScan(Relation heapRelation,
 extern double IndexBuildHeapRangeScan(Relation heapRelation,
 						Relation indexRelation,
 						IndexInfo *indexInfo,
+						TupleConversionMap *attrmap,
 						bool allow_sync,
 						bool anyvisible,
 						BlockNumber start_blockno,
@@ -144,6 +145,7 @@ extern bool reindex_relation(Oid relid, int flags, int options);
 extern bool ReindexIsProcessingHeap(Oid heapOid);
 extern bool ReindexIsProcessingIndex(Oid indexOid);
 extern Oid	IndexGetRelation(Oid indexId, bool missing_ok);
+extern bool IndexIsGlobal(Oid indexId, bool missing_ok);
 
 extern Size EstimateReindexStateSpace(void);
 extern void SerializeReindexState(Size maxsize, char *start_address);

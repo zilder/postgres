@@ -617,6 +617,7 @@ DefineIndex(Oid relationId,
 	indexInfo->ii_ExclusionProcs = NULL;
 	indexInfo->ii_ExclusionStrats = NULL;
 	indexInfo->ii_Unique = stmt->unique;
+	indexInfo->ii_Global = stmt->global;
 	/* In a concurrent build, mark it not-ready-for-inserts */
 	indexInfo->ii_ReadyForInserts = !stmt->concurrent;
 	indexInfo->ii_Concurrent = stmt->concurrent;

@@ -92,6 +92,7 @@ typedef struct RelationData
 	bool		rd_isvalid;		/* relcache entry is valid */
 	char		rd_indexvalid;	/* state of rd_indexlist: 0 = not valid, 1 =
 								 * valid, 2 = temporarily forced */
+	char		rd_globindexvalid; /* state of rd_globindexlist */
 	bool		rd_statvalid;	/* is rd_statlist valid? */
 
 	/*
@@ -133,6 +134,8 @@ typedef struct RelationData
 
 	/* data managed by RelationGetIndexList: */
 	List	   *rd_indexlist;	/* list of OIDs of indexes on relation */
+	List	   *rd_globindexlist; /* list of OIDs of global indexes regarding
+								   * this partition */
 	Oid			rd_oidindex;	/* OID of unique index on OID, if any */
 	Oid			rd_pkindex;		/* OID of primary key, if any */
 	Oid			rd_replidindex; /* OID of replica identity index, if any */

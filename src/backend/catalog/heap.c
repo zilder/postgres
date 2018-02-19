@@ -1777,7 +1777,7 @@ heap_drop_with_catalog(Oid relid)
 		elog(ERROR, "cache lookup failed for relation %u", relid);
 	if (((Form_pg_class) GETSTRUCT(tuple))->relispartition)
 	{
-		parentOid = get_partition_parent(relid);
+		parentOid = get_partition_parent(relid, false);
 		LockRelationOid(parentOid, AccessExclusiveLock);
 
 		/*
