@@ -211,7 +211,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			 * Ignore partitioned indexes, since they are not usable for
 			 * queries.
 			 */
-			if (indexRelation->rd_rel->relkind == RELKIND_PARTITIONED_INDEX)
+			if (indexRelation->rd_rel->relkind == RELKIND_PARTITIONED_INDEX
+				&& !index->indisglobal)
 			{
 				index_close(indexRelation, NoLock);
 				continue;

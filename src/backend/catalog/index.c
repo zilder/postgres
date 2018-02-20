@@ -822,10 +822,14 @@ index_create(Relation heapRelation,
 	/* constraint flags can only be set when a constraint is requested */
 	Assert((constr_flags == 0) ||
 		   ((flags & INDEX_CREATE_ADD_CONSTRAINT) != 0));
-	/* partitioned indexes must never be "built" by themselves */
-	Assert(!partitioned || (flags & INDEX_CREATE_SKIP_BUILD));
+	/*
+	 * partitioned indexes must never be "built" by themselves (except global
+	 * indexes)
+	 */
+	Assert(!(partitioned && !indexInfo->ii_Global) ||
+		   (flags & INDEX_CREATE_SKIP_BUILD));
 
-	relkind = partitioned ? RELKIND_PARTITIONED_INDEX : RELKIND_INDEX;
+	relkind = partitioned && !indexInfo->ii_Global ? RELKIND_PARTITIONED_INDEX : RELKIND_INDEX;
 	is_exclusion = (indexInfo->ii_ExclusionOps != NULL);
 
 	pg_class = heap_open(RelationRelationId, RowExclusiveLock);
@@ -2307,7 +2311,8 @@ index_build(Relation heapRelation,
 	 * Note that planner considers parallel safety for us.
 	 */
 	if (parallel && IsNormalProcessingMode() &&
-		indexRelation->rd_rel->relam == BTREE_AM_OID)
+		indexRelation->rd_rel->relam == BTREE_AM_OID &&
+		!indexInfo->ii_Global)
 		indexInfo->ii_ParallelWorkers =
 			plan_create_index_workers(RelationGetRelid(heapRelation),
 									  RelationGetRelid(indexRelation));
