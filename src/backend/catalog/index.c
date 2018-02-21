@@ -2420,43 +2420,21 @@ index_build(Relation heapRelation,
 	}
 
 	/*
-	 * Update heap and index pg_class rows
+	 * Update stats for heap relation (unless it is a partitioned parent)
+	 *
+	 * TODO: should we somehow change the format of IndexBuildResult to collect
+	 * stats for partitions and update it here?
 	 */
-	// if (!indexInfo->ii_Global)
-	// {
-	// 	index_update_stats(heapRelation,
-	// 					   true,
-	// 					   isprimary,
-	// 					   stats->heap_tuples);
-	// }
-	// else
-	// {
-	// 	List *children;
-	// 	ListCell *lc;
+	if (!indexInfo->ii_Global)
+	{
+		index_update_stats(heapRelation,
+						   true,
+						   isprimary,
+						   indexInfo->ii_Global,
+						   stats->heap_tuples);
+	}
 
-	// 	children = find_inheritance_children(RelationGetRelid(heapRelation),
-	// 										 AccessShareLock);
-	// 	foreach (lc, children)
-	// 	{
-	// 		Oid childRelid = lfirst_oid(lc);
-	// 		Relation childRel;
-
-	// 		childRel = heap_open(childRelid, AccessShareLock);
-	// 		/* TODO: Collect separate heap_tuples for each child */
-	// 		index_update_stats(childRel,
-	// 					   true,
-	// 					   isprimary,
-	// 					   stats->heap_tuples);
-	// 		heap_close(childRel, AccessShareLock);
-	// 	}
-	// }
-
-	index_update_stats(heapRelation,
-					   true,
-					   isprimary,
-					   indexInfo->ii_Global,
-					   stats->heap_tuples);
-
+	/* Update stats for index relation (including global indexes) */
 	index_update_stats(indexRelation,
 				   false,
 				   false,
