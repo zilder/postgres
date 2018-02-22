@@ -2424,19 +2424,17 @@ index_build(Relation heapRelation,
 	}
 
 	/*
-	 * Update stats for heap relation (unless it is a partitioned parent)
+	 * Update stats for heap relation (set 0 reltuples if it is a partitioned
+	 * parent)
 	 *
 	 * TODO: should we somehow change the format of IndexBuildResult to collect
 	 * stats for partitions and update it here?
 	 */
-	if (!indexInfo->ii_Global)
-	{
-		index_update_stats(heapRelation,
-						   true,
-						   isprimary,
-						   indexInfo->ii_Global,
-						   stats->heap_tuples);
-	}
+	index_update_stats(heapRelation,
+					   true,
+					   isprimary,
+					   indexInfo->ii_Global,
+					   indexInfo->ii_Global ? 0 : stats->heap_tuples);
 
 	/* Update stats for index relation (including global indexes) */
 	index_update_stats(indexRelation,
@@ -4326,4 +4324,35 @@ index_add_invalid_relid(Oid indexId, Oid relid)
 
 	// ReleaseSysCache(tuple);
 	heap_close(pg_index, RowExclusiveLock);
+}
+
+void
+index_get_invalid_relids(Relation relation, Oid **relids, int *num)
+{
+	List	   *result;
+	Datum		relidsDatum;
+	oidvector vector;
+	bool		isnull;
+	char	   *exprsString;
+	MemoryContext oldcxt;
+
+	/*
+	 * indcollation cannot be referenced directly through the C struct,
+	 * because it comes after the variable-width indkey field.  Must extract
+	 * the datum the hard way...
+	 */
+	relidsDatum = fastgetattr(relation->rd_indextuple,
+							  Anum_pg_index_indinvalidoids,
+							  GetPgIndexDescriptor(),
+							  &isnull);
+
+	Assert(!isnull);
+	vector = (oidvector *) DatumGetPointer(indcollDatum);
+	*num = vector->dim1
+
+	if (*num == 0)
+		*relids = NULL;
+
+	*relids = palloc(sizeof(Oid) * (*num));
+	memcpy(*relids, vector->values, *num * sizeof(Oid));
 }

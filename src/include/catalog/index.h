@@ -153,5 +153,6 @@ extern void RestoreReindexState(void *reindexstate);
 
 extern void IndexSetParentIndex(Relation idx, Oid parentOid);
 extern void index_add_invalid_relid(Oid indexId, Oid relid);
+extern void index_get_invalid_relids(Relation relation, Oid **relids, int *num);
 
 #endif							/* INDEX_H */

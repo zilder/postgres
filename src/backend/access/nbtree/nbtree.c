@@ -45,6 +45,8 @@ typedef struct
 	BlockNumber lastBlockVacuumed;	/* highest blkno actually vacuumed */
 	BlockNumber lastBlockLocked;	/* highest blkno we've cleanup-locked */
 	BlockNumber totFreePages;	/* true total # of free pages */
+	Oid		   *invalidoids;	/* relids of dropped partitions */
+	int			ninvalidoids;
 	MemoryContext pagedelcontext;
 } BTVacState;
 
@@ -890,6 +892,8 @@ btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 	vstate.lastBlockVacuumed = BTREE_METAPAGE;	/* Initialise at first block */
 	vstate.lastBlockLocked = BTREE_METAPAGE;
 	vstate.totFreePages = 0;
+	vstate.invalidoids = NULL;
+	vstate.ninvalidoids = 0;
 
 	/* Create a temporary memory context to run _bt_pagedel in */
 	vstate.pagedelcontext = AllocSetContextCreate(CurrentMemoryContext,
