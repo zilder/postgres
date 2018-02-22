@@ -1172,6 +1172,24 @@ RemoveRelations(DropStmt *drop)
 		obj.objectSubId = 0;
 
 		add_exact_object_address(&obj, objects);
+
+		/* Add relation oid to global indexes (if any) for future cleaning */
+		if (relkind == RELKIND_RELATION)
+		{
+			Relation	relation = heap_open(relOid, AccessExclusiveLock);
+			List	   *indexoids;
+			ListCell   *lc;
+
+			indexoids = RelationGetGlobalIndexList(relation);
+			foreach (lc, indexoids)
+			{
+				Oid indexOid = lfirst_oid(lc);
+
+				index_add_invalid_relid(indexOid, relOid);
+			}
+
+			heap_close(relation, AccessExclusiveLock);
+		}
 	}
 
 	performMultipleDeletions(objects, drop->behavior, flags);

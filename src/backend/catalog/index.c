@@ -618,6 +618,7 @@ UpdateIndexRelation(Oid indexoid,
 	oidvector  *indcollation;
 	oidvector  *indclass;
 	int2vector *indoption;
+	oidvector  *indinvalidoids;
 	Datum		exprsDatum;
 	Datum		predDatum;
 	Datum		values[Natts_pg_index];
@@ -651,6 +652,8 @@ UpdateIndexRelation(Oid indexoid,
 
 	indoption = buildint2vector(NULL, numatts + extra_atts);
 	memcpy(indoption->values, coloptions, numatts * sizeof(int16));
+
+	indinvalidoids = buildoidvector(NULL, 0);
 
 	if (extra_atts)
 	{
@@ -718,6 +721,7 @@ UpdateIndexRelation(Oid indexoid,
 	values[Anum_pg_index_indcollation - 1] = PointerGetDatum(indcollation);
 	values[Anum_pg_index_indclass - 1] = PointerGetDatum(indclass);
 	values[Anum_pg_index_indoption - 1] = PointerGetDatum(indoption);
+	values[Anum_pg_index_indinvalidoids - 1] = PointerGetDatum(indinvalidoids);
 	values[Anum_pg_index_indexprs - 1] = exprsDatum;
 	if (exprsDatum == (Datum) 0)
 		nulls[Anum_pg_index_indexprs - 1] = true;
@@ -4269,4 +4273,57 @@ RestoreReindexState(void *reindexstate)
 			lappend_oid(pendingReindexedIndexes,
 						sistate->pendingReindexedIndexes[c]);
 	MemoryContextSwitchTo(oldcontext);
+}
+
+#define OidVectorSize(n)	(offsetof(oidvector, values) + (n) * sizeof(Oid))
+
+void
+index_add_invalid_relid(Oid indexId, Oid relid)
+{
+	Relation	pg_index;
+	HeapTuple	tuple,
+				newtuple;
+	// Form_pg_index indexForm;
+	oidvector  *relids;
+	oidvector  *oldrelids;
+	// Anum_pg_index_indnatts
+	Datum		values[1000];
+	bool		nulls[1000] = {false};
+	bool		doReplace[1000] = {false};
+	int			i;
+
+	/* Assert that current xact hasn't done any transactional updates */
+	// Assert(GetTopTransactionIdIfAny() == InvalidTransactionId);
+
+	/* Open pg_index and fetch a writable copy of the index's tuple */
+	pg_index = heap_open(IndexRelationId, RowExclusiveLock);
+
+	tuple = SearchSysCacheCopy1(INDEXRELID,
+									 ObjectIdGetDatum(indexId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+	// indexForm = (Form_pg_index) GETSTRUCT(tuple);
+
+	heap_deform_tuple(tuple, RelationGetDescr(pg_index), values, nulls);
+
+	oldrelids = (oidvector *) values[Anum_pg_index_indinvalidoids - 1];
+	relids = buildoidvector(NULL, oldrelids->dim1 + 1);
+	for (i = 0; i < oldrelids->dim1; i++)
+		relids->values[i] = oldrelids->values[i];
+	relids->values[i] = relid;
+
+	// indexForm->indinvalidoids = relids;
+	values[Anum_pg_index_indinvalidoids - 1] = (Datum) relids;
+	doReplace[Anum_pg_index_indinvalidoids - 1] = true;
+
+	/* Update index form tuple */
+	// heap_update(pg_index, indexTuple);
+	newtuple = heap_modify_tuple(tuple, RelationGetDescr(pg_index),
+								 values, nulls, doReplace);
+	// indexTuple = heap_form_tuple(RelationGetDescr(pg_index), values, nulls);
+	CatalogTupleUpdate(pg_index, &newtuple->t_self, newtuple);
+	// heap_freetuple(tuple);
+
+	// ReleaseSysCache(tuple);
+	heap_close(pg_index, RowExclusiveLock);
 }

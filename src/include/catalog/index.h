@@ -152,5 +152,6 @@ extern void SerializeReindexState(Size maxsize, char *start_address);
 extern void RestoreReindexState(void *reindexstate);
 
 extern void IndexSetParentIndex(Relation idx, Oid parentOid);
+extern void index_add_invalid_relid(Oid indexId, Oid relid);
 
 #endif							/* INDEX_H */

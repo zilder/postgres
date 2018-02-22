@@ -52,6 +52,8 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 	oidvector	indcollation;	/* collation identifiers */
 	oidvector	indclass;		/* opclass identifiers */
 	int2vector	indoption;		/* per-column flags (AM-specific meanings) */
+	oidvector	indinvalidoids;	/* oids of partitions that have to be cleared
+								 * from index */
 	pg_node_tree indexprs;		/* expression trees for index attributes that
 								 * are not simple column references; one for
 								 * each zero entry in indkey[] */
@@ -71,7 +73,7 @@ typedef FormData_pg_index *Form_pg_index;
  *		compiler constants for pg_index
  * ----------------
  */
-#define Natts_pg_index					20
+#define Natts_pg_index					21
 #define Anum_pg_index_indexrelid		1
 #define Anum_pg_index_indrelid			2
 #define Anum_pg_index_indnatts			3
@@ -90,8 +92,9 @@ typedef FormData_pg_index *Form_pg_index;
 #define Anum_pg_index_indcollation		16
 #define Anum_pg_index_indclass			17
 #define Anum_pg_index_indoption			18
-#define Anum_pg_index_indexprs			19
-#define Anum_pg_index_indpred			20
+#define Anum_pg_index_indinvalidoids	19
+#define Anum_pg_index_indexprs			20
+#define Anum_pg_index_indpred			21
 
 /*
  * Index AMs that support ordered scans must support these two indoption
