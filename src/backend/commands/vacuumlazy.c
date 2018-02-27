@@ -152,7 +152,8 @@ static void lazy_vacuum_heap(Relation onerel, LVRelStats *vacrelstats);
 static bool lazy_check_needs_freeze(Buffer buf, bool *hastup);
 static void lazy_vacuum_index(Relation indrel,
 				  IndexBulkDeleteResult **stats,
-				  LVRelStats *vacrelstats);
+				  LVRelStats *vacrelstats,
+				  bool global_cleanup);
 static void lazy_cleanup_index(Relation indrel,
 				   IndexBulkDeleteResult *stats,
 				   LVRelStats *vacrelstats);
@@ -491,6 +492,7 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 		PROGRESS_VACUUM_MAX_DEAD_TUPLES
 	};
 	int64		initprog_val[3];
+	bool		global_indexes_cleanup;
 
 	pg_rusage_init(&ru0);
 
@@ -735,7 +737,8 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 			for (i = 0; i < nindexes; i++)
 				lazy_vacuum_index(Irel[i],
 								  &indstats[i],
-								  vacrelstats);
+								  vacrelstats,
+								  false);
 
 			/*
 			 * Report that we are now vacuuming the heap.  We also increase
@@ -1302,9 +1305,28 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 		vmbuffer = InvalidBuffer;
 	}
 
+	/* Are there global indexes that require cleanup? */
+	global_indexes_cleanup = false;
+	for (i = 0; i < nindexes; i++)
+	{
+		if (IndexIsGlobal(RelationGetRelid(Irel[i]), true))
+		{
+			Oid	   *relids = NULL;
+			int		num;
+
+			index_get_invalid_relids(Irel[i], &relids, &num);
+
+			if (relids)
+				pfree(relids);
+
+			if (num > 0)
+				global_indexes_cleanup = true;
+		}
+	}
+
 	/* If any tuples need to be deleted, perform final vacuum cycle */
 	/* XXX put a threshold on min number of tuples here? */
-	if (vacrelstats->num_dead_tuples > 0)
+	if (vacrelstats->num_dead_tuples > 0 || global_indexes_cleanup)
 	{
 		const int	hvp_index[] = {
 			PROGRESS_VACUUM_PHASE,
@@ -1323,7 +1345,8 @@ lazy_scan_heap(Relation onerel, int options, LVRelStats *vacrelstats,
 		for (i = 0; i < nindexes; i++)
 			lazy_vacuum_index(Irel[i],
 							  &indstats[i],
-							  vacrelstats);
+							  vacrelstats,
+							  global_indexes_cleanup);
 
 		/* Report that we are now vacuuming the heap */
 		hvp_val[0] = PROGRESS_VACUUM_PHASE_VACUUM_HEAP;
@@ -1616,7 +1639,8 @@ lazy_check_needs_freeze(Buffer buf, bool *hastup)
 static void
 lazy_vacuum_index(Relation indrel,
 				  IndexBulkDeleteResult **stats,
-				  LVRelStats *vacrelstats)
+				  LVRelStats *vacrelstats,
+				  bool global_cleanup)
 {
 	IndexVacuumInfo ivinfo;
 	PGRUsage	ru0;
@@ -1633,8 +1657,9 @@ lazy_vacuum_index(Relation indrel,
 	ivinfo.ninvalidoids = 0;
 
 	/* Obtain relids of dropped partitions */
-	index_get_invalid_relids(indrel,
-							 &ivinfo.invalidoids, &ivinfo.ninvalidoids);
+	if (global_cleanup)
+		index_get_invalid_relids(indrel,
+								 &ivinfo.invalidoids, &ivinfo.ninvalidoids);
 
 	/* Do bulk deletion */
 	*stats = index_bulk_delete(&ivinfo, *stats,
