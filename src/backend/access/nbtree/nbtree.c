@@ -45,8 +45,6 @@ typedef struct
 	BlockNumber lastBlockVacuumed;	/* highest blkno actually vacuumed */
 	BlockNumber lastBlockLocked;	/* highest blkno we've cleanup-locked */
 	BlockNumber totFreePages;	/* true total # of free pages */
-	Oid		   *invalidoids;	/* relids of dropped partitions */
-	int			ninvalidoids;
 	MemoryContext pagedelcontext;
 } BTVacState;
 
@@ -892,8 +890,6 @@ btvacuumscan(IndexVacuumInfo *info, IndexBulkDeleteResult *stats,
 	vstate.lastBlockVacuumed = BTREE_METAPAGE;	/* Initialise at first block */
 	vstate.lastBlockLocked = BTREE_METAPAGE;
 	vstate.totFreePages = 0;
-	vstate.invalidoids = NULL;
-	vstate.ninvalidoids = 0;
 
 	/* Create a temporary memory context to run _bt_pagedel in */
 	vstate.pagedelcontext = AllocSetContextCreate(CurrentMemoryContext,
@@ -1075,6 +1071,7 @@ restart:
 		OffsetNumber offnum,
 					minoff,
 					maxoff;
+		bool hasinvalidoids = vstate->info->ninvalidoids;
 
 		/*
 		 * Trade in the initial read lock for a super-exclusive write lock on
@@ -1113,7 +1110,7 @@ restart:
 		ndeletable = 0;
 		minoff = P_FIRSTDATAKEY(opaque);
 		maxoff = PageGetMaxOffsetNumber(page);
-		if (callback)
+		if (callback || hasinvalidoids)
 		{
 			for (offnum = minoff;
 				 offnum <= maxoff;
@@ -1147,8 +1144,28 @@ restart:
 				 * applies to *any* type of index that marks index tuples as
 				 * killed.
 				 */
-				if (callback(htup, callback_state))
+				if (callback && callback(htup, callback_state))
 					deletable[ndeletable++] = offnum;
+
+				if (hasinvalidoids)
+				{
+					TupleDesc tupdesc = RelationGetDescr(vstate->info->index);
+					Oid		relid;
+					int		i;
+
+					relid = index_tuple_extract_relid(itup, tupdesc);
+
+					/*
+					 * TODO: use binary search
+					 * TODO: don't forget to clear indinvalidoids after vacuum
+					 */
+					for (i = 0; i < vstate->info->ninvalidoids; i++)
+						if (relid == vstate->info->invalidoids[i])
+						{
+							deletable[ndeletable++] = offnum;
+							break;
+						}
+				}
 			}
 		}
 

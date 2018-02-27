@@ -128,7 +128,6 @@ do { \
 static IndexScanDesc index_beginscan_internal(Relation indexRelation,
 						 int nkeys, int norderbys, Snapshot snapshot,
 						 ParallelIndexScanDesc pscan, bool temp_snap);
-static Oid tuple_extract_relid(IndexScanDesc scan);
 
 typedef struct
 {
@@ -586,10 +585,12 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 
 	if (found && scan->indexRelation->rd_index->indisglobal)
 	{
-		Oid		relid = tuple_extract_relid(scan);
+		Oid		relid;
 		bool	exists = false;
 		partition_info *pinfo;
 
+		relid = index_tuple_extract_relid(scan->xs_itup,
+										  scan->indexRelation->rd_att);
 		pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_ENTER, &exists);
 		if (!exists)
 		{
@@ -624,15 +625,14 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	return &scan->xs_ctup.t_self;
 }
 
-static Oid
-tuple_extract_relid(IndexScanDesc scan)
+Oid
+index_tuple_extract_relid(IndexTuple itup, TupleDesc desc)
 {
-	TupleDesc	desc = scan->indexRelation->rd_att;
 	bool		isnull;
 	Datum		relid;
 
 	/* Heap relid is stored in the last attribute */
-	relid = index_getattr(scan->xs_itup, desc->natts, desc, &isnull);
+	relid = index_getattr(itup, desc->natts, desc, &isnull);
 	Assert(!isnull);
 
 	return DatumGetObjectId(relid);
@@ -771,10 +771,12 @@ index_getnext(IndexScanDesc scan, ScanDirection direction)
 			/* Convert tuple if we're scanning a global index */
 			if (scan->indexRelation->rd_index->indisglobal)
 			{
-				Oid		relid = tuple_extract_relid(scan);
+				Oid		relid;
 				partition_info *pinfo;
 				bool exists;
 
+				relid = index_tuple_extract_relid(scan->xs_itup,
+												  scan->indexRelation->rd_att);
 				pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_FIND, &exists);
 				Assert(exists);
 
@@ -849,6 +851,10 @@ index_bulk_delete(IndexVacuumInfo *info,
 
 	return indexRelation->rd_amroutine->ambulkdelete(info, stats,
 													 callback, callback_state);
+
+	/* TODO */
+	// if (IndexIsGlobal(RelationGetRelid(info->index), true))
+	// 	index_clear_invalid_relids(RelationGetRelid(info->index));
 }
 
 /* ----------------

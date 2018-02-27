@@ -62,6 +62,8 @@
 #include "utils/timestamp.h"
 #include "utils/tqual.h"
 
+#include "catalog/index.h"
+
 
 /*
  * Space/time tradeoff parameters: do these need to be user-tunable?
@@ -1627,10 +1629,20 @@ lazy_vacuum_index(Relation indrel,
 	ivinfo.message_level = elevel;
 	ivinfo.num_heap_tuples = vacrelstats->old_rel_tuples;
 	ivinfo.strategy = vac_strategy;
+	ivinfo.invalidoids = NULL;
+	ivinfo.ninvalidoids = 0;
+
+	/* Obtain relids of dropped partitions */
+	index_get_invalid_relids(indrel,
+							 &ivinfo.invalidoids, &ivinfo.ninvalidoids);
 
 	/* Do bulk deletion */
 	*stats = index_bulk_delete(&ivinfo, *stats,
 							   lazy_tid_reaped, (void *) vacrelstats);
+
+	/* TODO */
+	if (IndexIsGlobal(RelationGetRelid(indrel), true))
+		index_clear_invalid_relids(RelationGetRelid(indrel));
 
 	ereport(elevel,
 			(errmsg("scanned index \"%s\" to remove %d row versions",
@@ -1658,6 +1670,8 @@ lazy_cleanup_index(Relation indrel,
 	ivinfo.message_level = elevel;
 	ivinfo.num_heap_tuples = vacrelstats->new_rel_tuples;
 	ivinfo.strategy = vac_strategy;
+	ivinfo.invalidoids = NULL;
+	ivinfo.ninvalidoids = 0;
 
 	stats = index_vacuum_cleanup(&ivinfo, stats);
 

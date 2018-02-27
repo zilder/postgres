@@ -141,4 +141,6 @@ extern bool criticalRelcachesBuilt;
 /* should be used only by relcache.c and postinit.c */
 extern bool criticalSharedRelcachesBuilt;
 
+extern void index_get_invalid_relids(Relation relation, Oid **relids, int *num);
+
 #endif							/* RELCACHE_H */

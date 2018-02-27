@@ -6247,3 +6247,26 @@ unlink_initfile(const char *initfilename)
 			elog(LOG, "could not remove cache file \"%s\": %m", initfilename);
 	}
 }
+
+void
+index_get_invalid_relids(Relation relation, Oid **relids, int *num)
+{
+	Datum		relidsDatum;
+	oidvector *vector;
+	bool		isnull;
+
+	relidsDatum = fastgetattr(relation->rd_indextuple,
+							  Anum_pg_index_indinvalidoids,
+							  GetPgIndexDescriptor(),
+							  &isnull);
+
+	Assert(!isnull);
+	vector = (oidvector *) DatumGetPointer(relidsDatum);
+	*num = vector->dim1;
+
+	if (*num == 0)
+		*relids = NULL;
+
+	*relids = palloc(sizeof(Oid) * (*num));
+	memcpy(*relids, vector->values, *num * sizeof(Oid));
+}
