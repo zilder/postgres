@@ -33,6 +33,8 @@
 #include "utils/index_selfuncs.h"
 #include "utils/memutils.h"
 
+#include "catalog/index.h"
+
 
 /* Working state needed by btvacuumpage */
 typedef struct
@@ -1151,20 +1153,12 @@ restart:
 				{
 					TupleDesc tupdesc = RelationGetDescr(vstate->info->index);
 					Oid		relid;
-					int		i;
 
 					relid = index_tuple_extract_relid(itup, tupdesc);
-
-					/*
-					 * TODO: use binary search
-					 * TODO: don't forget to clear indinvalidoids after vacuum
-					 */
-					for (i = 0; i < vstate->info->ninvalidoids; i++)
-						if (relid == vstate->info->invalidoids[i])
-						{
-							deletable[ndeletable++] = offnum;
-							break;
-						}
+					if (bsearch_oid(vstate->info->invalidoids,
+									vstate->info->ninvalidoids,
+									relid) != -1)
+						deletable[ndeletable++] = offnum;
 				}
 			}
 		}

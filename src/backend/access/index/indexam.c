@@ -603,18 +603,11 @@ getnexttuple:
 		pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_ENTER, &exists);
 		if (!exists)
 		{
-			int i;
-
 			pinfo->relid = relid;
 			pinfo->isvalid = true;
 
-			/* TODO: use binary search */
-			for (i = 0; i < scan->ninvalidoids; i++)
-				if (relid == scan->invalidoids[i])
-				{
-					pinfo->isvalid = false;
-					break;
-				}
+			if (bsearch_oid(scan->invalidoids, scan->ninvalidoids, relid) != -1)
+				pinfo->isvalid = false;
 
 			/* Open relation and build a tuple conversion map */
 			if (pinfo->isvalid)

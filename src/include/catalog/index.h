@@ -155,4 +155,7 @@ extern void IndexSetParentIndex(Relation idx, Oid parentOid);
 extern void index_add_invalid_relid(Oid indexId, Oid relid);
 extern void index_clear_invalid_relids(Oid indexId);
 
+/* TODO: find a place for this function */
+int bsearch_oid(Oid *oids, int n, Oid value);
+
 #endif							/* INDEX_H */

@@ -52,8 +52,8 @@ CATALOG(pg_index,2610) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 	oidvector	indcollation;	/* collation identifiers */
 	oidvector	indclass;		/* opclass identifiers */
 	int2vector	indoption;		/* per-column flags (AM-specific meanings) */
-	oidvector	indinvalidoids;	/* oids of partitions that have to be cleared
-								 * from index */
+	oidvector	indinvalidoids;	/* oids of dropped partitions which are used
+								 * in vacuum process; should be sorted */
 	pg_node_tree indexprs;		/* expression trees for index attributes that
 								 * are not simple column references; one for
 								 * each zero entry in indkey[] */

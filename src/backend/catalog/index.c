@@ -4275,6 +4275,10 @@ RestoreReindexState(void *reindexstate)
 
 #define OidVectorSize(n)	(offsetof(oidvector, values) + (n) * sizeof(Oid))
 
+/*
+ * index_add_invalid_relid
+ *		Add relid to pg_index.indinvalidoids in a sorted manner
+ */
 void
 index_add_invalid_relid(Oid indexId, Oid relid)
 {
@@ -4286,28 +4290,39 @@ index_add_invalid_relid(Oid indexId, Oid relid)
 	Datum		values[Natts_pg_index];
 	bool		nulls[Natts_pg_index] = {false};
 	bool		doReplace[Natts_pg_index] = {false};
-	int			i;
+	Size		oldsize;
+	int			i = 0,
+				j = 0;
 
 	/* Open pg_index and fetch a writable copy of the index's tuple */
 	pg_index = heap_open(IndexRelationId, RowExclusiveLock);
+	tuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(indexId));
 
-	tuple = SearchSysCacheCopy1(INDEXRELID,
-									 ObjectIdGetDatum(indexId));
 	if (!HeapTupleIsValid(tuple))
 		elog(ERROR, "cache lookup failed for index %u", indexId);
 
+	/* transform tuple into values array */
 	heap_deform_tuple(tuple, RelationGetDescr(pg_index), values, nulls);
-
 	oldrelids = (oidvector *) values[Anum_pg_index_indinvalidoids - 1];
-	relids = buildoidvector(NULL, oldrelids->dim1 + 1);
-	for (i = 0; i < oldrelids->dim1; i++)
-		relids->values[i] = oldrelids->values[i];
-	relids->values[i] = relid;
+	oldsize = oldrelids->dim1;
+	relids = buildoidvector(NULL, oldsize + 1);
 
+	/* copy values until we find Oid that is greater than given relid */
+	while (i < oldsize && relid > oldrelids->values[i])
+		relids->values[j++] = oldrelids->values[i++];
+
+	/* insert new relid */
+	relids->values[j++] = relid;
+
+	/* copy the rest */
+	while (i < oldsize)
+		relids->values[j++] = oldrelids->values[i++];
+
+	/* update values */
 	values[Anum_pg_index_indinvalidoids - 1] = (Datum) relids;
 	doReplace[Anum_pg_index_indinvalidoids - 1] = true;
 
-	/* Update index form tuple */
+	/* update index form tuple */
 	newtuple = heap_modify_tuple(tuple, RelationGetDescr(pg_index),
 								 values, nulls, doReplace);
 	CatalogTupleUpdate(pg_index, &newtuple->t_self, newtuple);
@@ -4346,4 +4361,36 @@ index_clear_invalid_relids(Oid indexId)
 	CatalogTupleUpdate(pg_index, &newtuple->t_self, newtuple);
 
 	heap_close(pg_index, RowExclusiveLock);	
+}
+
+/*
+ * bsearch_oid
+ *		Binary search for oids array
+ *
+ * Returns position of value in array or -1 if it isn't in array
+ */
+int
+bsearch_oid(Oid *oids, int n, Oid value)
+{
+	int lower = 0,
+		upper = n - 1;
+	int middle;
+
+	/* trivial cases */
+	if (n == 0)
+		return -1;
+
+	while (lower <= upper)
+	{
+		middle = (upper - lower) / 2;
+
+		if (value < oids[middle])
+			upper = middle - 1;
+		else if (value > oids[middle])
+			lower = middle;
+		else
+			return middle;
+	}
+
+	return -1;
 }
