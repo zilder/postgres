@@ -133,6 +133,7 @@ typedef struct
 {
 	Oid			relid;
 	Relation	rel;
+	bool		isvalid;
 	TupleConversionMap *attrmap;
 } partition_info;
 
@@ -250,7 +251,11 @@ index_beginscan(Relation heapRelation,
 		scan->heapRelationsMap = hash_create("index relations", 100, &ctl,
 											 HASH_ELEM | HASH_BLOBS);
 
-		scan->xs_want_itup = true;
+		scan->xs_want_itup = true;	/* get index tuple */
+
+		/* Fetch dropped partitions oids if any */
+		index_get_invalid_relids(scan->indexRelation,
+								 &scan->invalidoids, &scan->ninvalidoids);
 	}
 
 	/*
@@ -387,9 +392,12 @@ index_endscan(IndexScanDesc scan)
 		hash_seq_init(&status, scan->heapRelationsMap);
 		while ((pinfo = (partition_info *) hash_seq_search(&status)) != NULL)
 		{
-			if (pinfo->attrmap)
-				free_conversion_map(pinfo->attrmap);
-			heap_close(pinfo->rel, AccessShareLock);
+			if (pinfo->isvalid)
+			{
+				if (pinfo->attrmap)
+					free_conversion_map(pinfo->attrmap);
+				heap_close(pinfo->rel, AccessShareLock);
+			}
 		}
 
 		hash_destroy(scan->heapRelationsMap);
@@ -581,6 +589,7 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 	 * scan->xs_recheck and possibly scan->xs_itup/scan->xs_hitup, though we
 	 * pay no attention to those fields here.
 	 */
+getnexttuple:
 	found = scan->indexRelation->rd_amroutine->amgettuple(scan, direction);
 
 	if (found && scan->indexRelation->rd_index->indisglobal)
@@ -594,13 +603,34 @@ index_getnext_tid(IndexScanDesc scan, ScanDirection direction)
 		pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_ENTER, &exists);
 		if (!exists)
 		{
-			/* TODO: get appropriate lock */
+			int i;
+
 			pinfo->relid = relid;
-			pinfo->rel = heap_open(relid, AccessShareLock);
-			pinfo->attrmap = convert_tuples_by_name(RelationGetDescr(pinfo->rel),
-													RelationGetDescr(scan->origHeapRelation),
-													"index_getnext_tid");
+			pinfo->isvalid = true;
+
+			/* TODO: use binary search */
+			for (i = 0; i < scan->ninvalidoids; i++)
+				if (relid == scan->invalidoids[i])
+				{
+					pinfo->isvalid = false;
+					break;
+				}
+
+			/* Open relation and build a tuple conversion map */
+			if (pinfo->isvalid)
+			{
+				/* TODO: get appropriate lock */
+				pinfo->rel = heap_open(relid, AccessShareLock);
+				pinfo->attrmap = convert_tuples_by_name(RelationGetDescr(pinfo->rel),
+														RelationGetDescr(scan->origHeapRelation),
+														"index_getnext_tid");
+			}
 		}
+
+		/* If partition is invalid try the next tuple */
+		if (!pinfo->isvalid)
+			goto getnexttuple;
+
 		scan->heapRelation = pinfo->rel;
 	}
 
@@ -777,7 +807,9 @@ index_getnext(IndexScanDesc scan, ScanDirection direction)
 
 				relid = index_tuple_extract_relid(scan->xs_itup,
 												  scan->indexRelation->rd_att);
-				pinfo = hash_search(scan->heapRelationsMap, (const void *) &relid, HASH_FIND, &exists);
+				pinfo = hash_search(scan->heapRelationsMap,
+									(const void *) &relid,
+									HASH_FIND, &exists);
 				Assert(exists);
 
 				/* Is conversion required? */

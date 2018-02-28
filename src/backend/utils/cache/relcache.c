@@ -6248,14 +6248,18 @@ unlink_initfile(const char *initfilename)
 	}
 }
 
+/*
+ * index_get_invalid_relids
+ *		Load invalid partition oids into relids parameter
+ */
 void
-index_get_invalid_relids(Relation relation, Oid **relids, int *num)
+index_get_invalid_relids(Relation indrel, Oid **relids, int *num)
 {
 	Datum		relidsDatum;
-	oidvector *vector;
+	oidvector  *vector;
 	bool		isnull;
 
-	relidsDatum = fastgetattr(relation->rd_indextuple,
+	relidsDatum = fastgetattr(indrel->rd_indextuple,
 							  Anum_pg_index_indinvalidoids,
 							  GetPgIndexDescriptor(),
 							  &isnull);

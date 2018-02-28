@@ -106,6 +106,9 @@ typedef struct IndexScanDescData
 	bool		xactStartedInRecovery;	/* prevents killing/seeing killed
 										 * tuples */
 
+	Oid		   *invalidoids;	/* dropped partitions oids */
+	int			ninvalidoids;
+
 	/* index access method's private state */
 	void	   *opaque;			/* access-method-specific info */
 
