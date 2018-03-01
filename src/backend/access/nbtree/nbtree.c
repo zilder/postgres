@@ -1155,9 +1155,9 @@ restart:
 					Oid		relid;
 
 					relid = index_tuple_extract_relid(itup, tupdesc);
-					if (bsearch_oid(vstate->info->invalidoids,
-									vstate->info->ninvalidoids,
-									relid) != -1)
+					if (bsearch(&relid, vstate->info->invalidoids,
+								vstate->info->ninvalidoids, sizeof(Oid),
+								oid_cmp) != NULL)
 						deletable[ndeletable++] = offnum;
 				}
 			}

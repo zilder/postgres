@@ -79,10 +79,9 @@
 #include "storage/bufmgr.h"
 #include "storage/lmgr.h"
 #include "storage/predicate.h"
+#include "utils/builtins.h"
 #include "utils/snapmgr.h"
 #include "utils/tqual.h"
-
-#include "utils/memutils.h"
 
 
 /* ----------------------------------------------------------------
@@ -606,7 +605,8 @@ getnexttuple:
 			pinfo->relid = relid;
 			pinfo->isvalid = true;
 
-			if (bsearch_oid(scan->invalidoids, scan->ninvalidoids, relid) != -1)
+			if (bsearch(&relid, scan->invalidoids, scan->ninvalidoids,
+						sizeof(Oid), oid_cmp) != NULL)
 				pinfo->isvalid = false;
 
 			/* Open relation and build a tuple conversion map */

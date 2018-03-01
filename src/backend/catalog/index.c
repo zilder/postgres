@@ -4362,35 +4362,3 @@ index_clear_invalid_relids(Oid indexId)
 
 	heap_close(pg_index, RowExclusiveLock);	
 }
-
-/*
- * bsearch_oid
- *		Binary search for oids array
- *
- * Returns position of value in array or -1 if it isn't in array
- */
-int
-bsearch_oid(Oid *oids, int n, Oid value)
-{
-	int lower = 0,
-		upper = n - 1;
-	int middle;
-
-	/* trivial cases */
-	if (n == 0)
-		return -1;
-
-	while (lower <= upper)
-	{
-		middle = (upper - lower) / 2;
-
-		if (value < oids[middle])
-			upper = middle - 1;
-		else if (value > oids[middle])
-			lower = middle;
-		else
-			return middle;
-	}
-
-	return -1;
-}
