@@ -180,7 +180,7 @@ BuildIndexValueDescription(Relation indexRelation,
 	StringInfoData buf;
 	Form_pg_index idxrec;
 	HeapTuple	ht_idx;
-	int			natts = indexRelation->rd_rel->relnatts;
+	int			natts;
 	int			i;
 	int			keyno;
 	Oid			indexrelid = RelationGetRelid(indexRelation);
@@ -250,6 +250,7 @@ BuildIndexValueDescription(Relation indexRelation,
 	appendStringInfo(&buf, "(%s)=(",
 					 pg_get_indexdef_columns(indexrelid, true));
 
+	natts = indexRelation->rd_rel->relnatts - (idxrec->indisglobal ? 1 : 0);
 	for (i = 0; i < natts; i++)
 	{
 		char	   *val;

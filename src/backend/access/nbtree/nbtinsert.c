@@ -25,6 +25,7 @@
 #include "storage/predicate.h"
 #include "utils/tqual.h"
 
+#include "catalog/index.h"
 
 typedef struct
 {
@@ -46,14 +47,21 @@ typedef struct
 	int			best_delta;		/* best size delta so far */
 } FindSplitData;
 
+typedef struct
+{
+	/* context data for _bt_doinsert */
+	Relation	rel;
+	Relation	heapRel;
+	bool		isglobal;
+	HTAB	   *partitions;
+} InsertContext;
 
 static Buffer _bt_newroot(Relation rel, Buffer lbuf, Buffer rbuf);
 
-static TransactionId _bt_check_unique(Relation rel, IndexTuple itup,
-				 Relation heapRel, Buffer buf, OffsetNumber offset,
-				 ScanKey itup_scankey,
-				 IndexUniqueCheck checkUnique, bool *is_unique,
-				 uint32 *speculativeToken);
+static TransactionId _bt_check_unique(InsertContext *ictx, IndexTuple itup,
+				 Buffer buf, OffsetNumber offset,
+				 ScanKey itup_scankey, IndexUniqueCheck checkUnique,
+				 bool *is_unique, uint32 *speculativeToken);
 static void _bt_findinsertloc(Relation rel,
 				  Buffer *bufptr,
 				  OffsetNumber *offsetptr,
@@ -109,14 +117,23 @@ _bt_doinsert(Relation rel, IndexTuple itup,
 			 IndexUniqueCheck checkUnique, Relation heapRel)
 {
 	bool		is_unique = false;
-	int			natts = rel->rd_rel->relnatts;
+	int			natts;
 	ScanKey		itup_scankey;
 	BTStack		stack;
 	Buffer		buf;
 	OffsetNumber offset;
+	InsertContext ictx;
+
+	/* initialize context */
+	ictx.rel = rel;
+	ictx.heapRel = heapRel;
+	ictx.isglobal = IndexIsGlobal(RelationGetRelid(rel), false);
+	ictx.partitions = NULL;
 
 	/* we need an insertion scan key to do our search, so build one */
 	itup_scankey = _bt_mkscankey(rel, itup);
+	/* TODO: check that it doesn't affect something else */
+	natts = rel->rd_rel->relnatts - (ictx.isglobal ? 1 : 0);
 
 top:
 	/* find the first page containing this key */
@@ -165,7 +182,7 @@ top:
 		uint32		speculativeToken;
 
 		offset = _bt_binsrch(rel, buf, natts, itup_scankey, false);
-		xwait = _bt_check_unique(rel, itup, heapRel, buf, offset, itup_scankey,
+		xwait = _bt_check_unique(&ictx, itup, buf, offset, itup_scankey,
 								 checkUnique, &is_unique, &speculativeToken);
 
 		if (TransactionIdIsValid(xwait))
@@ -211,6 +228,16 @@ top:
 	}
 
 	/* be tidy */
+	if (ictx.partitions)
+	{
+		HASH_SEQ_STATUS status;
+		Relation	   *partRel;
+
+		hash_seq_init(&status, ictx.partitions);
+
+		while ((partRel = hash_seq_search(&status)) != NULL)
+			heap_close(*partRel, AccessShareLock);
+	}
 	_bt_freestack(stack);
 	_bt_freeskey(itup_scankey);
 
@@ -237,13 +264,13 @@ top:
  * core code must redo the uniqueness check later.
  */
 static TransactionId
-_bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
+_bt_check_unique(InsertContext *ictx, IndexTuple itup,
 				 Buffer buf, OffsetNumber offset, ScanKey itup_scankey,
 				 IndexUniqueCheck checkUnique, bool *is_unique,
 				 uint32 *speculativeToken)
 {
-	TupleDesc	itupdesc = RelationGetDescr(rel);
-	int			natts = rel->rd_rel->relnatts;
+	TupleDesc	itupdesc = RelationGetDescr(ictx->rel);
+	int			natts;
 	SnapshotData SnapshotDirty;
 	OffsetNumber maxoff;
 	Page		page;
@@ -253,6 +280,12 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 
 	/* Assume unique until we find a duplicate */
 	*is_unique = true;
+
+	/*
+	 * Exclude relid attribute for global index
+	 * TODO: probably it shouldn't be at rel at all
+	 */
+	natts = ictx->rel->rd_rel->relnatts - (ictx->isglobal ? 1 : 0);
 
 	InitDirtySnapshot(SnapshotDirty);
 
@@ -325,133 +358,180 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 				 * that satisfies SnapshotDirty.  This is necessary because we
 				 * have just a single index entry for the entire chain.
 				 */
-				else if (heap_hot_search(&htid, heapRel, &SnapshotDirty,
-										 &all_dead))
+				else 
 				{
-					TransactionId xwait;
+					Relation *heapRel;
+					bool pfound;
 
-					/*
-					 * It is a duplicate. If we are only doing a partial
-					 * check, then don't bother checking if the tuple is being
-					 * updated in another transaction. Just return the fact
-					 * that it is a potential conflict and leave the full
-					 * check till later.
-					 */
-					if (checkUnique == UNIQUE_CHECK_PARTIAL)
+					if (!ictx->isglobal)
 					{
-						if (nbuf != InvalidBuffer)
-							_bt_relbuf(rel, nbuf);
-						*is_unique = false;
-						return InvalidTransactionId;
-					}
-
-					/*
-					 * If this tuple is being updated by other transaction
-					 * then we have to wait for its commit/abort.
-					 */
-					xwait = (TransactionIdIsValid(SnapshotDirty.xmin)) ?
-						SnapshotDirty.xmin : SnapshotDirty.xmax;
-
-					if (TransactionIdIsValid(xwait))
-					{
-						if (nbuf != InvalidBuffer)
-							_bt_relbuf(rel, nbuf);
-						/* Tell _bt_doinsert to wait... */
-						*speculativeToken = SnapshotDirty.speculativeToken;
-						return xwait;
-					}
-
-					/*
-					 * Otherwise we have a definite conflict.  But before
-					 * complaining, look to see if the tuple we want to insert
-					 * is itself now committed dead --- if so, don't complain.
-					 * This is a waste of time in normal scenarios but we must
-					 * do it to support CREATE INDEX CONCURRENTLY.
-					 *
-					 * We must follow HOT-chains here because during
-					 * concurrent index build, we insert the root TID though
-					 * the actual tuple may be somewhere in the HOT-chain.
-					 * While following the chain we might not stop at the
-					 * exact tuple which triggered the insert, but that's OK
-					 * because if we find a live tuple anywhere in this chain,
-					 * we have a unique key conflict.  The other live tuple is
-					 * not part of this chain because it had a different index
-					 * entry.
-					 */
-					htid = itup->t_tid;
-					if (heap_hot_search(&htid, heapRel, SnapshotSelf, NULL))
-					{
-						/* Normal case --- it's still live */
+						heapRel = &ictx->heapRel;
 					}
 					else
+					{
+						Oid relid = index_tuple_extract_relid(curitup, itupdesc);
+
+						if (relid == RelationGetRelid(ictx->heapRel))
+							heapRel = &ictx->heapRel;
+						else
+						{
+							if (!ictx->partitions)
+							{
+								HASHCTL		ctl;
+
+								memset(&ctl, 0, sizeof(ctl));
+								ctl.keysize = sizeof(Oid);
+								ctl.entrysize = sizeof(Relation);
+
+								ictx->partitions = hash_create("insert partitions",
+															   10, &ctl, HASH_ELEM);
+							}
+
+							heapRel = hash_search(ictx->partitions, &relid, HASH_FIND, &pfound);
+							if (!pfound)
+							{
+								heapRel = hash_search(ictx->partitions, &relid, HASH_ENTER, NULL);
+								/* TODO: don't forget to close it */
+								*heapRel = heap_open(relid, AccessShareLock);
+							}
+						}
+					}
+
+					if (heap_hot_search(&htid, *heapRel, &SnapshotDirty,
+										 &all_dead))
+					{
+						TransactionId xwait;
+
+						/*
+						 * It is a duplicate. If we are only doing a partial
+						 * check, then don't bother checking if the tuple is being
+						 * updated in another transaction. Just return the fact
+						 * that it is a potential conflict and leave the full
+						 * check till later.
+						 */
+						if (checkUnique == UNIQUE_CHECK_PARTIAL)
+						{
+							if (nbuf != InvalidBuffer)
+								_bt_relbuf(ictx->rel, nbuf);
+							*is_unique = false;
+							return InvalidTransactionId;
+						}
+
+						/*
+						 * If this tuple is being updated by other transaction
+						 * then we have to wait for its commit/abort.
+						 */
+						xwait = (TransactionIdIsValid(SnapshotDirty.xmin)) ?
+							SnapshotDirty.xmin : SnapshotDirty.xmax;
+
+						if (TransactionIdIsValid(xwait))
+						{
+							if (nbuf != InvalidBuffer)
+								_bt_relbuf(ictx->rel, nbuf);
+							/* Tell _bt_doinsert to wait... */
+							*speculativeToken = SnapshotDirty.speculativeToken;
+							return xwait;
+						}
+
+						/*
+						 * Otherwise we have a definite conflict.  But before
+						 * complaining, look to see if the tuple we want to insert
+						 * is itself now committed dead --- if so, don't complain.
+						 * This is a waste of time in normal scenarios but we must
+						 * do it to support CREATE INDEX CONCURRENTLY.
+						 *
+						 * We must follow HOT-chains here because during
+						 * concurrent index build, we insert the root TID though
+						 * the actual tuple may be somewhere in the HOT-chain.
+						 * While following the chain we might not stop at the
+						 * exact tuple which triggered the insert, but that's OK
+						 * because if we find a live tuple anywhere in this chain,
+						 * we have a unique key conflict.  The other live tuple is
+						 * not part of this chain because it had a different index
+						 * entry.
+						 */
+						/*
+						 * TODO: is this valid since global index cannot be
+						 * created concurrently?
+						 */
+						if (!ictx->isglobal)
+						{
+							htid = itup->t_tid;
+							if (heap_hot_search(&htid, *heapRel, SnapshotSelf, NULL))
+							{
+								/* Normal case --- it's still live */
+							}
+							else
+							{
+								/*
+								 * It's been deleted, so no error, and no need to
+								 * continue searching
+								 */
+								break;
+							}
+						}
+
+						/*
+						 * Check for a conflict-in as we would if we were going to
+						 * write to this page.  We aren't actually going to write,
+						 * but we want a chance to report SSI conflicts that would
+						 * otherwise be masked by this unique constraint
+						 * violation.
+						 */
+						CheckForSerializableConflictIn(ictx->rel, NULL, buf);
+
+						/*
+						 * This is a definite conflict.  Break the tuple down into
+						 * datums and report the error.  But first, make sure we
+						 * release the buffer locks we're holding ---
+						 * BuildIndexValueDescription could make catalog accesses,
+						 * which in the worst case might touch this same index and
+						 * cause deadlocks.
+						 */
+						if (nbuf != InvalidBuffer)
+							_bt_relbuf(ictx->rel, nbuf);
+						_bt_relbuf(ictx->rel, buf);
+
+						{
+							Datum		values[INDEX_MAX_KEYS];
+							bool		isnull[INDEX_MAX_KEYS];
+							char	   *key_desc;
+
+							index_deform_tuple(itup, RelationGetDescr(ictx->rel),
+											   values, isnull);
+
+							key_desc = BuildIndexValueDescription(ictx->rel,
+																  values, isnull);
+
+							ereport(ERROR,
+									(errcode(ERRCODE_UNIQUE_VIOLATION),
+									 errmsg("duplicate key value violates unique constraint \"%s\"",
+											RelationGetRelationName(ictx->rel)),
+									 key_desc ? errdetail("Key %s already exists.",
+														  key_desc) : 0,
+									 errtableconstraint(*heapRel,
+														RelationGetRelationName(ictx->rel))));
+						}
+					}
+					else if (all_dead)
 					{
 						/*
-						 * It's been deleted, so no error, and no need to
-						 * continue searching
+						 * The conflicting tuple (or whole HOT chain) is dead to
+						 * everyone, so we may as well mark the index entry
+						 * killed.
 						 */
-						break;
+						ItemIdMarkDead(curitemid);
+						opaque->btpo_flags |= BTP_HAS_GARBAGE;
+
+						/*
+						 * Mark buffer with a dirty hint, since state is not
+						 * crucial. Be sure to mark the proper buffer dirty.
+						 */
+						if (nbuf != InvalidBuffer)
+							MarkBufferDirtyHint(nbuf, true);
+						else
+							MarkBufferDirtyHint(buf, true);
 					}
-
-					/*
-					 * Check for a conflict-in as we would if we were going to
-					 * write to this page.  We aren't actually going to write,
-					 * but we want a chance to report SSI conflicts that would
-					 * otherwise be masked by this unique constraint
-					 * violation.
-					 */
-					CheckForSerializableConflictIn(rel, NULL, buf);
-
-					/*
-					 * This is a definite conflict.  Break the tuple down into
-					 * datums and report the error.  But first, make sure we
-					 * release the buffer locks we're holding ---
-					 * BuildIndexValueDescription could make catalog accesses,
-					 * which in the worst case might touch this same index and
-					 * cause deadlocks.
-					 */
-					if (nbuf != InvalidBuffer)
-						_bt_relbuf(rel, nbuf);
-					_bt_relbuf(rel, buf);
-
-					{
-						Datum		values[INDEX_MAX_KEYS];
-						bool		isnull[INDEX_MAX_KEYS];
-						char	   *key_desc;
-
-						index_deform_tuple(itup, RelationGetDescr(rel),
-										   values, isnull);
-
-						key_desc = BuildIndexValueDescription(rel, values,
-															  isnull);
-
-						ereport(ERROR,
-								(errcode(ERRCODE_UNIQUE_VIOLATION),
-								 errmsg("duplicate key value violates unique constraint \"%s\"",
-										RelationGetRelationName(rel)),
-								 key_desc ? errdetail("Key %s already exists.",
-													  key_desc) : 0,
-								 errtableconstraint(heapRel,
-													RelationGetRelationName(rel))));
-					}
-				}
-				else if (all_dead)
-				{
-					/*
-					 * The conflicting tuple (or whole HOT chain) is dead to
-					 * everyone, so we may as well mark the index entry
-					 * killed.
-					 */
-					ItemIdMarkDead(curitemid);
-					opaque->btpo_flags |= BTP_HAS_GARBAGE;
-
-					/*
-					 * Mark buffer with a dirty hint, since state is not
-					 * crucial. Be sure to mark the proper buffer dirty.
-					 */
-					if (nbuf != InvalidBuffer)
-						MarkBufferDirtyHint(nbuf, true);
-					else
-						MarkBufferDirtyHint(buf, true);
 				}
 			}
 		}
@@ -473,14 +553,14 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 			for (;;)
 			{
 				nblkno = opaque->btpo_next;
-				nbuf = _bt_relandgetbuf(rel, nbuf, nblkno, BT_READ);
+				nbuf = _bt_relandgetbuf(ictx->rel, nbuf, nblkno, BT_READ);
 				page = BufferGetPage(nbuf);
 				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 				if (!P_IGNORE(opaque))
 					break;
 				if (P_RIGHTMOST(opaque))
 					elog(ERROR, "fell off the end of index \"%s\"",
-						 RelationGetRelationName(rel));
+						 RelationGetRelationName(ictx->rel));
 			}
 			maxoff = PageGetMaxOffsetNumber(page);
 			offset = P_FIRSTDATAKEY(opaque);
@@ -496,13 +576,13 @@ _bt_check_unique(Relation rel, IndexTuple itup, Relation heapRel,
 		ereport(ERROR,
 				(errcode(ERRCODE_INTERNAL_ERROR),
 				 errmsg("failed to re-find tuple within index \"%s\"",
-						RelationGetRelationName(rel)),
+						RelationGetRelationName(ictx->rel)),
 				 errhint("This may be because of a non-immutable index expression."),
-				 errtableconstraint(heapRel,
-									RelationGetRelationName(rel))));
+				 errtableconstraint(ictx->heapRel,
+									RelationGetRelationName(ictx->rel))));
 
 	if (nbuf != InvalidBuffer)
-		_bt_relbuf(rel, nbuf);
+		_bt_relbuf(ictx->rel, nbuf);
 
 	return InvalidTransactionId;
 }

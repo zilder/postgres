@@ -435,7 +435,7 @@ DefineIndex(Oid relationId,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot create index on partitioned table \"%s\" concurrently",
 							RelationGetRelationName(rel))));
-		if (stmt->unique)
+		if (stmt->unique && !global)
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot create unique index on partitioned table \"%s\"",
