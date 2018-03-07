@@ -946,6 +946,9 @@ getHashFnv1a(int64 val, uint64 seed)
 
 /*
  * Murmur2 hash function
+ *
+ * Based on original work of Austin Appleby
+ * https://github.com/aappleby/smhasher/blob/master/src/MurmurHash2.cpp
  */
 static int64
 getHashMurmur2(int64 val, uint64 seed)
