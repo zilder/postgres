@@ -1684,6 +1684,9 @@ connectDBStart(PGconn *conn)
 	int			ret;
 	int			i;
 
+	pg_conn_address addrs[1024];	/* TODO */
+	int			naddrs = 0;
+
 	if (!conn)
 		return 0;
 
@@ -1787,6 +1790,31 @@ connectDBStart(PGconn *conn)
 			conn->options_valid = false;
 			goto connect_errReturn;
 		}
+
+		if (ch->addrlist)
+		{
+			struct addrinfo *addr;
+
+			for (addr = ch->addrlist; addr != NULL; addr = addr->ai_next)
+			{
+				addrs[naddrs].info = addr;
+				addrs[naddrs++].hostidx = i;
+			}
+		}
+	}
+
+	if (naddrs)
+	{
+		Size_t connaddr_sz = sizeof(pg_conn_address) * naddrs;
+
+		conn->connaddr = malloc(connaddr_sz);
+		if (!conn->connaddr)
+		{
+			printfPQExpBuffer(&conn->errorMessage,
+					  		  libpq_gettext("out of memory\n"));
+			goto connect_errReturn;
+		}
+		memcpy((char *) conn->connaddr, (char *) addrs, connaddr_sz);
 	}
 
 #ifdef USE_SSL
