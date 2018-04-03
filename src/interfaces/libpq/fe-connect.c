@@ -2111,7 +2111,7 @@ keep_going:						/* We will come back to here until there is
 				 * returned by pg_getaddrinfo_all().  conn->addr_cur is the
 				 * next one to try. We fail when we run out of addresses.
 				 */
-				conn->addr_cur = conn->connaddr[0].info; /* TODO: should it be [whichaddr]? */
+				// conn->addr_cur = conn->connaddr[0].info; /* TODO: should it be [whichaddr]? */
 				for (;;)
 				{
 					struct addrinfo *addr_cur;
@@ -2135,6 +2135,9 @@ keep_going:						/* We will come back to here until there is
 					 * TODO: if read-write required then check if host isn't
 					 * marked read-only already
 					 */
+
+
+					conn->addr_cur = conn->connaddr[conn->whichaddr].info;
 
 					/* Remember current address for possible error msg */
 					addr_cur = conn->addr_cur;
