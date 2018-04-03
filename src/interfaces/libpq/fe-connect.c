@@ -128,6 +128,9 @@ static int ldapServiceLookup(const char *purl, PQconninfoOption *options,
 #define DefaultSSLMode	"disable"
 #endif
 
+#define CURRENT_HOST(conn) \
+	((conn)->connhost[(conn)->connaddr[(conn)->whichaddr].hostidx])
+
 /* ----------
  * Definition of the conninfo parameters and their fallback resources.
  *
@@ -403,6 +406,7 @@ static char *passwordFromFile(char *hostname, char *port, char *dbname,
 				 char *username, char *pgpassfile);
 static void pgpassfileWarning(PGconn *conn);
 static void default_threadlock(int acquire);
+static void displayed_host_port(PGconn *conn, char **displayed_host, char **displayed_port);
 
 
 /* global variable because fe-auth.c needs to access it */
@@ -899,7 +903,8 @@ connectOptions2(PGconn *conn)
 	 * try to connect.  For that, count the number of elements in the hostaddr
 	 * or host options.  If neither is given, assume one host.
 	 */
-	conn->whichhost = 0;
+	// conn->whichhost = 0;
+	conn->whichaddr = 0;
 	if (conn->pghostaddr && conn->pghostaddr[0] != '\0')
 		conn->nconnhost = count_comma_separated_elems(conn->pghostaddr);
 	else if (conn->pghost && conn->pghost[0] != '\0')
@@ -928,6 +933,7 @@ connectOptions2(PGconn *conn)
 				goto oom_error;
 
 			conn->connhost[i].type = CHT_HOST_ADDRESS;
+			conn->connhost[i].readonly = false;
 		}
 
 		/*
@@ -960,6 +966,7 @@ connectOptions2(PGconn *conn)
 					conn->connhost[i].type = CHT_UNIX_SOCKET;
 #endif
 			}
+			conn->connhost[i].readonly = false;
 		}
 		if (more || i != conn->nconnhost)
 		{
@@ -985,6 +992,7 @@ connectOptions2(PGconn *conn)
 		conn->connhost[0].host = strdup(DefaultHost);
 		conn->connhost[0].type = CHT_HOST_NAME;
 #endif
+		conn->connhost[0].readonly = false;
 		if (conn->connhost[0].host == NULL)
 			goto oom_error;
 	}
@@ -1438,17 +1446,19 @@ connectFailureMessage(PGconn *conn, int errorno)
 	else
 #endif							/* HAVE_UNIX_SOCKETS */
 	{
-		char		host_addr[NI_MAXHOST];
-		const char *displayed_host;
-		const char *displayed_port;
+		char	host_addr[NI_MAXHOST];
+		char   *displayed_host;
+		char   *displayed_port;
 		struct sockaddr_storage *addr = &conn->raddr.addr;
 
 		/*
 		 * Optionally display the network address with the hostname. This is
 		 * useful to distinguish between IPv4 and IPv6 connections.
 		 */
-		if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
-			strlcpy(host_addr, conn->connhost[conn->whichhost].hostaddr, NI_MAXHOST);
+		// if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
+		// 	strlcpy(host_addr, conn->connhost[conn->whichhost].hostaddr, NI_MAXHOST);
+		if (CURRENT_HOST(conn).type == CHT_HOST_ADDRESS)
+			strlcpy(host_addr, CURRENT_HOST(conn).hostaddr, NI_MAXHOST);
 		else if (addr->ss_family == AF_INET)
 		{
 			if (inet_net_ntop(AF_INET,
@@ -1471,20 +1481,21 @@ connectFailureMessage(PGconn *conn, int errorno)
 			strcpy(host_addr, "???");
 
 		/* To which host and port were we actually connecting? */
-		if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
-			displayed_host = conn->connhost[conn->whichhost].hostaddr;
-		else
-			displayed_host = conn->connhost[conn->whichhost].host;
-		displayed_port = conn->connhost[conn->whichhost].port;
-		if (displayed_port == NULL || displayed_port[0] == '\0')
-			displayed_port = DEF_PGPORT_STR;
+		// if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
+		// 	displayed_host = conn->connhost[conn->whichhost].hostaddr;
+		// else
+		// 	displayed_host = conn->connhost[conn->whichhost].host;
+		// displayed_port = conn->connhost[conn->whichhost].port;
+		displayed_host_port(conn, &displayed_host, &displayed_port);
 
 		/*
 		 * If the user did not supply an IP address using 'hostaddr', and
 		 * 'host' was missing or does not match our lookup, display the
 		 * looked-up IP address.
 		 */
-		if (conn->connhost[conn->whichhost].type != CHT_HOST_ADDRESS &&
+		// if (conn->connhost[conn->whichhost].type != CHT_HOST_ADDRESS &&
+		// 	strcmp(displayed_host, host_addr) != 0)
+		if (CURRENT_HOST(conn).type != CHT_HOST_ADDRESS &&
 			strcmp(displayed_host, host_addr) != 0)
 			appendPQExpBuffer(&conn->errorMessage,
 							  libpq_gettext("could not connect to server: %s\n"
@@ -1805,7 +1816,7 @@ connectDBStart(PGconn *conn)
 
 	if (naddrs)
 	{
-		Size_t connaddr_sz = sizeof(pg_conn_address) * naddrs;
+		Size connaddr_sz = sizeof(pg_conn_address) * naddrs;
 
 		conn->connaddr = malloc(connaddr_sz);
 		if (!conn->connaddr)
@@ -1815,6 +1826,7 @@ connectDBStart(PGconn *conn)
 			goto connect_errReturn;
 		}
 		memcpy((char *) conn->connaddr, (char *) addrs, connaddr_sz);
+		conn->nconnaddr = naddrs;
 	}
 
 #ifdef USE_SSL
@@ -1828,8 +1840,10 @@ connectDBStart(PGconn *conn)
 	/*
 	 * Set up to try to connect, with protocol 3.0 as the first attempt.
 	 */
-	conn->whichhost = 0;
-	conn->addr_cur = conn->connhost[0].addrlist;
+	// conn->whichhost = 0;
+	// conn->addr_cur = conn->connhost[0].addrlist;
+	conn->whichaddr = 0;
+	conn->addr_cur = conn->connaddr[0].info;
 	conn->pversion = PG_PROTOCOL(3, 0);
 	conn->send_appname = true;
 	conn->status = CONNECTION_NEEDED;
@@ -1935,9 +1949,10 @@ connectDBComplete(PGconn *conn)
 			 * If there are no more hosts, return (the error message is
 			 * already set)
 			 */
-			if (++conn->whichhost >= conn->nconnhost)
+			// if (++conn->whichhost >= conn->nconnhost)
+			if (++conn->whichaddr >= conn->nconnaddr)
 			{
-				conn->whichhost = 0;
+				conn->whichaddr = 0;
 				conn->status = CONNECTION_BAD;
 				return 0;
 			}
@@ -1947,7 +1962,8 @@ connectDBComplete(PGconn *conn)
 			 * connect_timeout timer
 			 */
 			pqDropConnection(conn, true);
-			conn->addr_cur = conn->connhost[conn->whichhost].addrlist;
+			// conn->addr_cur = conn->connhost[conn->whichhost].addrlist;
+			conn->addr_cur = CURRENT_HOST(conn).addrlist;
 			conn->status = CONNECTION_NEEDED;
 			if (conn->connect_timeout != NULL)
 				finish_time = time(NULL) + timeout;
@@ -2095,6 +2111,7 @@ keep_going:						/* We will come back to here until there is
 				 * returned by pg_getaddrinfo_all().  conn->addr_cur is the
 				 * next one to try. We fail when we run out of addresses.
 				 */
+				conn->addr_cur = conn->connaddr[0].info; /* TODO: should it be [whichaddr]? */
 				for (;;)
 				{
 					struct addrinfo *addr_cur;
@@ -2103,16 +2120,21 @@ keep_going:						/* We will come back to here until there is
 					 * Advance to next possible host, if we've tried all of
 					 * the addresses for the current host.
 					 */
-					if (conn->addr_cur == NULL)
-					{
-						if (++conn->whichhost >= conn->nconnhost)
-						{
-							conn->whichhost = 0;
-							break;
-						}
-						conn->addr_cur =
-							conn->connhost[conn->whichhost].addrlist;
-					}
+					// if (conn->addr_cur == NULL)
+					// {
+					// 	if (++conn->whichhost >= conn->nconnhost)
+					// 	{
+					// 		conn->whichhost = 0;
+					// 		break;
+					// 	}
+					// 	conn->addr_cur =
+					// 		conn->connhost[conn->whichhost].addrlist;
+					// }
+
+					/*
+					 * TODO: if read-write required then check if host isn't
+					 * marked read-only already
+					 */
 
 					/* Remember current address for possible error msg */
 					addr_cur = conn->addr_cur;
@@ -2127,10 +2149,12 @@ keep_going:						/* We will come back to here until there is
 						 * ignore socket() failure if we have more addresses
 						 * to try
 						 */
-						if (addr_cur->ai_next != NULL ||
-							conn->whichhost + 1 < conn->nconnhost)
+						// if (addr_cur->ai_next != NULL ||
+						// 	conn->whichhost + 1 < conn->nconnhost)
+						if (conn->whichaddr + 1 < conn->nconnaddr)
 						{
-							conn->addr_cur = addr_cur->ai_next;
+							// conn->addr_cur = addr_cur->ai_next;
+							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 							continue;
 						}
 						appendPQExpBuffer(&conn->errorMessage,
@@ -2149,7 +2173,8 @@ keep_going:						/* We will come back to here until there is
 						if (!connectNoDelay(conn))
 						{
 							pqDropConnection(conn, true);
-							conn->addr_cur = addr_cur->ai_next;
+							// conn->addr_cur = addr_cur->ai_next;
+							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 							continue;
 						}
 					}
@@ -2159,7 +2184,8 @@ keep_going:						/* We will come back to here until there is
 										  libpq_gettext("could not set socket to nonblocking mode: %s\n"),
 										  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
 						pqDropConnection(conn, true);
-						conn->addr_cur = addr_cur->ai_next;
+						// conn->addr_cur = addr_cur->ai_next;
+						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 						continue;
 					}
 
@@ -2170,7 +2196,8 @@ keep_going:						/* We will come back to here until there is
 										  libpq_gettext("could not set socket to close-on-exec mode: %s\n"),
 										  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
 						pqDropConnection(conn, true);
-						conn->addr_cur = addr_cur->ai_next;
+						// conn->addr_cur = addr_cur->ai_next;
+						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 						continue;
 					}
 #endif							/* F_SETFD */
@@ -2218,7 +2245,8 @@ keep_going:						/* We will come back to here until there is
 						if (err)
 						{
 							pqDropConnection(conn, true);
-							conn->addr_cur = addr_cur->ai_next;
+							// conn->addr_cur = addr_cur->ai_next;
+							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 							continue;
 						}
 					}
@@ -2309,7 +2337,8 @@ keep_going:						/* We will come back to here until there is
 					/*
 					 * Try the next address, if any.
 					 */
-					conn->addr_cur = addr_cur->ai_next;
+					// conn->addr_cur = addr_cur->ai_next;
+					conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 				}				/* loop over addresses */
 
 				/*
@@ -2355,10 +2384,12 @@ keep_going:						/* We will come back to here until there is
 					 * If more addresses remain, keep trying, just as in the
 					 * case where connect() returned failure immediately.
 					 */
-					if (conn->addr_cur->ai_next != NULL ||
-						conn->whichhost + 1 < conn->nconnhost)
+					// if (conn->addr_cur->ai_next != NULL ||
+					// 	conn->whichhost + 1 < conn->nconnhost)
+					if (conn->whichaddr + 1 < conn->nconnaddr)
 					{
-						conn->addr_cur = conn->addr_cur->ai_next;
+						// conn->addr_cur = conn->addr_cur->ai_next;
+						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 						conn->status = CONNECTION_NEEDED;
 						goto keep_going;
 					}
@@ -3120,8 +3151,8 @@ keep_going:						/* We will come back to here until there is
 			}
 		case CONNECTION_CHECK_WRITABLE:
 			{
-				const char *displayed_host;
-				const char *displayed_port;
+				char *displayed_host;
+				char *displayed_port;
 
 				if (!saveErrorMessage(conn, &savedMessage))
 					goto error_return;
@@ -3149,16 +3180,19 @@ keep_going:						/* We will come back to here until there is
 					val = PQgetvalue(res, 0, 0);
 					if (strncmp(val, "on", 2) == 0)
 					{
-						const char *displayed_host;
-						const char *displayed_port;
+						char *displayed_host;
+						char *displayed_port;
 
-						if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
-							displayed_host = conn->connhost[conn->whichhost].hostaddr;
-						else
-							displayed_host = conn->connhost[conn->whichhost].host;
-						displayed_port = conn->connhost[conn->whichhost].port;
-						if (displayed_port == NULL || displayed_port[0] == '\0')
-							displayed_port = DEF_PGPORT_STR;
+						CURRENT_HOST(conn).readonly = true;
+
+						// if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
+						// 	displayed_host = conn->connhost[conn->whichhost].hostaddr;
+						// else
+						// 	displayed_host = conn->connhost[conn->whichhost].host;
+						// displayed_port = conn->connhost[conn->whichhost].port;
+						// if (displayed_port == NULL || displayed_port[0] == '\0')
+						// 	displayed_port = DEF_PGPORT_STR;
+						displayed_host_port(conn, &displayed_host, &displayed_port);
 
 						PQclear(res);
 						restoreErrorMessage(conn, &savedMessage);
@@ -3174,8 +3208,10 @@ keep_going:						/* We will come back to here until there is
 						pqDropConnection(conn, true);
 
 						/* Skip any remaining addresses for this host. */
-						conn->addr_cur = NULL;
-						if (conn->whichhost + 1 < conn->nconnhost)
+						// conn->addr_cur = NULL;
+						// if (conn->whichhost + 1 < conn->nconnhost)
+						/* TODO: if proved read only then skip */
+						if (conn->whichaddr + 1 < conn->nconnaddr)
 						{
 							conn->status = CONNECTION_NEEDED;
 							goto keep_going;
@@ -3206,13 +3242,14 @@ keep_going:						/* We will come back to here until there is
 					PQclear(res);
 				restoreErrorMessage(conn, &savedMessage);
 
-				if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
-					displayed_host = conn->connhost[conn->whichhost].hostaddr;
-				else
-					displayed_host = conn->connhost[conn->whichhost].host;
-				displayed_port = conn->connhost[conn->whichhost].port;
-				if (displayed_port == NULL || displayed_port[0] == '\0')
-					displayed_port = DEF_PGPORT_STR;
+				// if (conn->connhost[conn->whichhost].type == CHT_HOST_ADDRESS)
+				// 	displayed_host = conn->connhost[conn->whichhost].hostaddr;
+				// else
+				// 	displayed_host = conn->connhost[conn->whichhost].host;
+				// displayed_port = conn->connhost[conn->whichhost].port;
+				// if (displayed_port == NULL || displayed_port[0] == '\0')
+				// 	displayed_port = DEF_PGPORT_STR;
+				displayed_host_port(conn, &displayed_host, &displayed_port);
 				appendPQExpBuffer(&conn->errorMessage,
 								  libpq_gettext("test \"SHOW transaction_read_only\" failed "
 												"on server \"%s:%s\"\n"),
@@ -3221,10 +3258,12 @@ keep_going:						/* We will come back to here until there is
 				sendTerminateConn(conn);
 				pqDropConnection(conn, true);
 
-				if (conn->addr_cur->ai_next != NULL ||
-					conn->whichhost + 1 < conn->nconnhost)
+				// if (conn->addr_cur->ai_next != NULL ||
+				// 	conn->whichhost + 1 < conn->nconnhost)
+				if (conn->whichaddr + 1 < conn->nconnaddr)
 				{
-					conn->addr_cur = conn->addr_cur->ai_next;
+					// conn->addr_cur = conn->addr_cur->ai_next;
+					conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
 					conn->status = CONNECTION_NEEDED;
 					goto keep_going;
 				}
@@ -3459,6 +3498,8 @@ freePGconn(PGconn *conn)
 		free(conn->connhost);
 	}
 
+	if (conn->connaddr)
+		free(conn->connaddr);
 	if (conn->client_encoding_initial)
 		free(conn->client_encoding_initial);
 	if (conn->events)
@@ -6022,7 +6063,8 @@ PQpass(const PGconn *conn)
 	if (!conn)
 		return NULL;
 	if (conn->connhost != NULL)
-		password = conn->connhost[conn->whichhost].password;
+		// password = conn->connhost[conn->whichhost].password;
+		password = CURRENT_HOST(conn).password;
 	if (password == NULL)
 		password = conn->pgpass;
 	/* Historically we've returned "" not NULL for no password specified */
@@ -6036,9 +6078,12 @@ PQhost(const PGconn *conn)
 {
 	if (!conn)
 		return NULL;
+	// if (conn->connhost != NULL &&
+	// 	conn->connhost[conn->whichhost].type != CHT_HOST_ADDRESS)
+	// 	return conn->connhost[conn->whichhost].host;
 	if (conn->connhost != NULL &&
-		conn->connhost[conn->whichhost].type != CHT_HOST_ADDRESS)
-		return conn->connhost[conn->whichhost].host;
+		CURRENT_HOST(conn).type != CHT_HOST_ADDRESS)
+		return CURRENT_HOST(conn).host;
 	else if (conn->pghost != NULL && conn->pghost[0] != '\0')
 		return conn->pghost;
 	else
@@ -6057,7 +6102,8 @@ PQport(const PGconn *conn)
 	if (!conn)
 		return NULL;
 	if (conn->connhost != NULL)
-		return conn->connhost[conn->whichhost].port;
+		// return conn->connhost[conn->whichhost].port;
+		return CURRENT_HOST(conn).port;
 	return conn->pgport;
 }
 
@@ -6632,4 +6678,18 @@ PQregisterThreadLock(pgthreadlock_t newhandler)
 		pg_g_threadlock = default_threadlock;
 
 	return prev;
+}
+
+static void
+displayed_host_port(PGconn *conn, char **displayed_host, char **displayed_port)
+{
+	pg_conn_host *h = &CURRENT_HOST(conn);
+
+	if (h->type == CHT_HOST_ADDRESS)
+		*displayed_host = h->hostaddr;
+	else
+		*displayed_host = h->host;
+	*displayed_port = h->port;
+	if (*displayed_port == NULL || *displayed_port[0] == '\0')
+		*displayed_port = DEF_PGPORT_STR;
 }

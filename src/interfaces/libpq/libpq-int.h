@@ -313,6 +313,7 @@ typedef struct pg_conn_host
 								 * password file.  only set if the PGconn's
 								 * pgpass field is NULL. */
 	struct addrinfo *addrlist;	/* list of possible backend addresses */
+	bool		readonly;		/* true if host is proved to be read-only */
 } pg_conn_host;
 
 typedef struct pg_conn_address
