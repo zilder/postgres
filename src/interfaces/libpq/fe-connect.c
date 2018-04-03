@@ -1950,7 +1950,7 @@ connectDBComplete(PGconn *conn)
 			 * already set)
 			 */
 			// if (++conn->whichhost >= conn->nconnhost)
-			if (++conn->whichaddr >= conn->nconnaddr)
+			if (conn->whichaddr + 1 >= conn->nconnaddr)
 			{
 				conn->whichaddr = 0;
 				conn->status = CONNECTION_BAD;
@@ -2136,6 +2136,9 @@ keep_going:						/* We will come back to here until there is
 					 * marked read-only already
 					 */
 
+					/* No more addresses */
+					if (conn->whichaddr >= conn->nconnaddr)
+						break;
 
 					conn->addr_cur = conn->connaddr[conn->whichaddr].info;
 
@@ -2157,7 +2160,8 @@ keep_going:						/* We will come back to here until there is
 						if (conn->whichaddr + 1 < conn->nconnaddr)
 						{
 							// conn->addr_cur = addr_cur->ai_next;
-							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+							// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+							conn->whichaddr++;
 							continue;
 						}
 						appendPQExpBuffer(&conn->errorMessage,
@@ -2177,7 +2181,7 @@ keep_going:						/* We will come back to here until there is
 						{
 							pqDropConnection(conn, true);
 							// conn->addr_cur = addr_cur->ai_next;
-							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+							conn->whichaddr++;
 							continue;
 						}
 					}
@@ -2188,7 +2192,8 @@ keep_going:						/* We will come back to here until there is
 										  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
 						pqDropConnection(conn, true);
 						// conn->addr_cur = addr_cur->ai_next;
-						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						conn->whichaddr++;
 						continue;
 					}
 
@@ -2200,7 +2205,8 @@ keep_going:						/* We will come back to here until there is
 										  SOCK_STRERROR(SOCK_ERRNO, sebuf, sizeof(sebuf)));
 						pqDropConnection(conn, true);
 						// conn->addr_cur = addr_cur->ai_next;
-						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						conn->whichaddr++;
 						continue;
 					}
 #endif							/* F_SETFD */
@@ -2249,7 +2255,8 @@ keep_going:						/* We will come back to here until there is
 						{
 							pqDropConnection(conn, true);
 							// conn->addr_cur = addr_cur->ai_next;
-							conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+							// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+							conn->whichaddr++;
 							continue;
 						}
 					}
@@ -2341,7 +2348,8 @@ keep_going:						/* We will come back to here until there is
 					 * Try the next address, if any.
 					 */
 					// conn->addr_cur = addr_cur->ai_next;
-					conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+					// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+					conn->whichaddr++;
 				}				/* loop over addresses */
 
 				/*
@@ -2392,7 +2400,8 @@ keep_going:						/* We will come back to here until there is
 					if (conn->whichaddr + 1 < conn->nconnaddr)
 					{
 						// conn->addr_cur = conn->addr_cur->ai_next;
-						conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+						conn->whichaddr++;
 						conn->status = CONNECTION_NEEDED;
 						goto keep_going;
 					}
@@ -3266,7 +3275,8 @@ keep_going:						/* We will come back to here until there is
 				if (conn->whichaddr + 1 < conn->nconnaddr)
 				{
 					// conn->addr_cur = conn->addr_cur->ai_next;
-					conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+					// conn->addr_cur = conn->connaddr[++conn->whichaddr].info;
+					conn->whichaddr++;
 					conn->status = CONNECTION_NEEDED;
 					goto keep_going;
 				}
