@@ -371,6 +371,9 @@ struct pg_conn
 	/* Type of connection to make.  Possible values: any, read-write. */
 	char	   *target_session_attrs;
 
+	/* Connection order. Possible values: sequential, random */
+	char	   *hostorder;
+
 	/* Optional file to write trace info to */
 	FILE	   *Pfdebug;
 

@@ -74,6 +74,8 @@ static int ldapServiceLookup(const char *purl, PQconninfoOption *options,
 #include "common/ip.h"
 #include "mb/pg_wchar.h"
 
+#include "portability/instr_time.h"
+
 
 #ifndef WIN32
 #define PGPASSFILE ".pgpass"
@@ -122,6 +124,7 @@ static int ldapServiceLookup(const char *purl, PQconninfoOption *options,
 #define DefaultOption	""
 #define DefaultAuthtype		  ""
 #define DefaultTargetSessionAttrs	"any"
+#define DefaultHostorder	"sequential"
 #ifdef USE_SSL
 #define DefaultSSLMode "prefer"
 #else
@@ -325,6 +328,10 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
 		DefaultTargetSessionAttrs, NULL,
 		"Target-Session-Attrs", "", 11, /* sizeof("read-write") = 11 */
 	offsetof(struct pg_conn, target_session_attrs)},
+
+	{"hostorder", NULL, DefaultHostorder, NULL,
+		"Hostorder", "", 10, /* sizeof("sequential") = 10 */
+	offsetof(struct pg_conn, hostorder)},
 
 	/* Terminating entry --- MUST BE LAST */
 	{NULL, NULL, NULL, NULL,
@@ -1196,6 +1203,22 @@ connectOptions2(PGconn *conn)
 	}
 
 	/*
+	 * Validate hostorder option.
+	 */
+	if (conn->hostorder)
+	{
+		if (strcmp(conn->hostorder, "sequential") != 0
+			&& strcmp(conn->hostorder, "random") != 0)
+		{
+			conn->status = CONNECTION_BAD;
+			printfPQExpBuffer(&conn->errorMessage,
+							  libpq_gettext("invalid hostorder value: \"%s\"\n"),
+							  conn->hostorder);
+			return false;
+		}
+	}
+
+	/*
 	 * Only if we get this far is it appropriate to try to connect. (We need a
 	 * state flag, rather than just the boolean result of this function, in
 	 * case someone tries to PQreset() the PGconn.)
@@ -1827,6 +1850,34 @@ connectDBStart(PGconn *conn)
 		}
 		memcpy((char *) conn->connaddr, (char *) addrs, connaddr_sz);
 		conn->nconnaddr = naddrs;
+
+		/*
+		 * If random hostorder is specified then permutate original
+		 * addresses array
+		 */
+		if (conn->hostorder != NULL
+			&& strcmp(conn->hostorder, "random") == 0)
+		{
+			int			i;
+			instr_time	t;
+
+			INSTR_TIME_SET_CURRENT(t);
+			srandom((unsigned int) INSTR_TIME_GET_MICROSEC(t));
+
+			for (i = 0; i < naddrs; i++)
+			{
+				long r1 = random() % naddrs,
+					 r2 = random() % naddrs;
+				pg_conn_address tmp;
+
+				if (r1 == r2)
+					continue;
+
+				tmp = conn->connaddr[r1];
+				conn->connaddr[r1] = conn->connaddr[r2];
+				conn->connaddr[r2] = tmp;
+			}
+		}
 	}
 
 #ifdef USE_SSL
@@ -2131,14 +2182,21 @@ keep_going:						/* We will come back to here until there is
 					// 		conn->connhost[conn->whichhost].addrlist;
 					// }
 
-					/*
-					 * TODO: if read-write required then check if host isn't
-					 * marked read-only already
-					 */
-
 					/* No more addresses */
 					if (conn->whichaddr >= conn->nconnaddr)
 						break;
+
+					/*
+					 * If read-write connection is required check whether
+					 * host was already marked as read-only
+					 */
+					if (conn->target_session_attrs != NULL
+						&& strcmp(conn->target_session_attrs, "read-write") == 0
+						&& CURRENT_HOST(conn).readonly)
+					{
+						conn->whichaddr++;
+						continue;
+					}
 
 					conn->addr_cur = conn->connaddr[conn->whichaddr].info;
 
