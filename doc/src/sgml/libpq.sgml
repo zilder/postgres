@@ -845,7 +845,7 @@ postgresql://localhost/mydb
 postgresql://user@localhost
 postgresql://user:secret@localhost
 postgresql://other@localhost/otherdb?connect_timeout=10&amp;application_name=myapp
-postgresql://host1:123,host2:456/somedb?target_session_attrs=any&amp;application_name=myapp
+postgresql://host1:123,host2:456/somedb?hostorder=random&target_session_attrs=any&amp;application_name=myapp
 </programlisting>
     Components of the hierarchical part of the <acronym>URI</acronym> can also
     be given as parameters.  For example:
@@ -910,14 +910,15 @@ postgresql://%2Fvar%2Flib%2Fpostgresql/dbname
      <title>Specifying Multiple Hosts</title>
 
      <para>
-       It is possible to specify multiple hosts to connect to, so that they are
-       tried in the given order. In the Keyword/Value format, the <literal>host</>,
-       <literal>hostaddr</>, and <literal>port</> options accept a comma-separated
-       list of values. The same number of elements must be given in each option, such
-       that e.g. the first <literal>hostaddr</> corresponds to the first host name,
-       the second <literal>hostaddr</> corresponds to the second host name, and so
-       forth. As an exception, if only one <literal>port</literal> is specified, it
-       applies to all the hosts.
+       It is possible to specify multiple hosts to connect to. In the Keyword/Value
+       format, the <literal>host</>, <literal>hostaddr</>, and <literal>port</>
+       options accept a comma-separated list of values. The same number of
+       elements must be given in each option, such that e.g. the first
+       <literal>hostaddr</> corresponds to the first host name, the second
+       <literal>hostaddr</> corresponds to the second host name, and so
+       forth. As an exception, if only one <literal>port</literal> is specified,
+       it applies to all the hosts. The order in which hosts are tried may be
+       specified by <xref linkend="libpq-connect-hostorder"> parameter.
      </para>
 
      <para>
@@ -968,8 +969,7 @@ postgresql://%2Fvar%2Flib%2Fpostgresql/dbname
         Unix-domain sockets, the default is to connect to <literal>localhost</>.
        </para>
        <para>
-        A comma-separated list of host names is also accepted, in which case
-        each host name in the list is tried in order. See
+        A comma-separated list of host names is also accepted. See
         <xref linkend="libpq-multiple-hosts"> for details.
        </para>
       </listitem>
@@ -1035,6 +1035,30 @@ postgresql://%2Fvar%2Flib%2Fpostgresql/dbname
         <application>libpq</application> will connect using a
         local Unix-domain socket; or on machines without Unix-domain
         sockets, it will attempt to connect to <literal>localhost</>.
+       </para>
+       </listitem>
+      </varlistentry>
+
+      <varlistentry id="libpq-connect-hostorder" xreflabel="hostorder">
+       <term><literal>hostorder</literal></term>
+       <listitem>
+       <para>
+        Specifies the order in which hosts from the list of hosts
+        specified by the <xref linkend="libpq-connect-host"> parameter are
+        tried.
+       </para>
+       <para>
+        If the value of this argument is <literal>sequential</literal> (the
+        default) connections to the hosts will be attempted in the order in
+        which they are given.
+       </para>
+       <para>
+        If the value is <literal>random</literal>, the host to connect to
+        will be randomly picked from the list. It allows load balacing between
+        several cluster nodes. However, PostgreSQL doesn't currently support
+        multimaster clusters. So, without the use of third-party products,
+        only read-only connections can take advantage from load-balancing.
+        See <xref linkend="libpq-connect-target-session-attrs">
        </para>
        </listitem>
       </varlistentry>
