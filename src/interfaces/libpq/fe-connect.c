@@ -133,6 +133,8 @@ static int ldapServiceLookup(const char *purl, PQconninfoOption *options,
 
 #define CURRENT_HOST(conn) \
 	((conn)->connhost[(conn)->connaddr[(conn)->whichaddr].hostidx])
+#define SHOULD_TRY_NEXT_ADDR(conn) \
+	((conn)->whichaddr + 1 < (conn)->nconnaddr || (conn)->failover_timeout)
 
 /* ----------
  * Definition of the conninfo parameters and their fallback resources.
@@ -332,6 +334,10 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
 	{"hostorder", NULL, DefaultHostorder, NULL,
 		"Hostorder", "", 10, /* sizeof("sequential") = 10 */
 	offsetof(struct pg_conn, hostorder)},
+
+	{"failover_timeout", NULL, NULL, NULL,
+		"Failover Timeout", "", 10,
+	offsetof(struct pg_conn, failover_timeout)},
 
 	/* Terminating entry --- MUST BE LAST */
 	{NULL, NULL, NULL, NULL,
@@ -1885,6 +1891,11 @@ connectDBStart(PGconn *conn)
 	conn->pversion = PG_PROTOCOL(3, 0);
 	conn->send_appname = true;
 	conn->status = CONNECTION_NEEDED;
+	if (conn->failover_timeout)
+		conn->failover_finish_time = time(NULL) + atoi(conn->failover_timeout);
+	else
+		conn->failover_finish_time = (time_t) 0;		/* it is in past, so its
+														 * ok */
 
 	/*
 	 * The code for processing CONNECTION_NEEDED state is in PQconnectPoll(),
@@ -2153,7 +2164,31 @@ keep_going:						/* We will come back to here until there is
 
 					/* No more addresses */
 					if (conn->whichaddr >= conn->nconnaddr)
-						break;
+					{
+						if (time(NULL) < conn->failover_finish_time)
+						{
+							/*
+							 * If failover timeout is set, retry list of hosts
+							 * from the beginning
+							 */
+							pg_usleep(1000000);
+							conn->whichaddr = 0;
+
+							/*
+							 * Reset readonly flag for all hosts as one of
+							 * them might have been promoted
+							 */
+							if (strcmp(conn->target_session_attrs, "read-write") == 0)
+							{
+								int i;
+
+								for (i = 0; i < conn->nconnhost; i++)
+									conn->connhost[i].readonly = false;
+							}
+						}
+						else
+							break;	/* Stop trying */
+					}
 
 					/*
 					 * If read-write connection is required check whether
@@ -2180,7 +2215,7 @@ keep_going:						/* We will come back to here until there is
 						 * ignore socket() failure if we have more addresses
 						 * to try
 						 */
-						if (conn->whichaddr + 1 < conn->nconnaddr)
+						if (SHOULD_TRY_NEXT(conn))
 						{
 							conn->whichaddr++;
 							continue;
@@ -2407,7 +2442,7 @@ keep_going:						/* We will come back to here until there is
 					 * If more addresses remain, keep trying, just as in the
 					 * case where connect() returned failure immediately.
 					 */
-					if (conn->whichaddr + 1 < conn->nconnaddr)
+					if (SHOULD_TRY_NEXT_ADDR(conn))
 					{
 						conn->whichaddr++;
 						conn->status = CONNECTION_NEEDED;
@@ -3219,7 +3254,7 @@ keep_going:						/* We will come back to here until there is
 						sendTerminateConn(conn);
 						pqDropConnection(conn, true);
 
-						if (conn->whichaddr + 1 < conn->nconnaddr)
+						if (SHOULD_TRY_NEXT_ADDR(conn))
 						{
 							conn->whichaddr++;
 							conn->status = CONNECTION_NEEDED;
@@ -3260,7 +3295,7 @@ keep_going:						/* We will come back to here until there is
 				sendTerminateConn(conn);
 				pqDropConnection(conn, true);
 
-				if (conn->whichaddr + 1 < conn->nconnaddr)
+				if (SHOULD_TRY_NEXT_ADDR(conn))
 				{
 					conn->whichaddr++;
 					conn->status = CONNECTION_NEEDED;
