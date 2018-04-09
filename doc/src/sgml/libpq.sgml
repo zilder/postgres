@@ -1139,6 +1139,29 @@ postgresql://%2Fvar%2Flib%2Fpostgresql/dbname
       </listitem>
      </varlistentry>
 
+     <varlistentry id="libpq-connect-falover-timeout" xreflabel="failover_timeout">
+      <term><literal>failover_timeout</literal></term>
+      <listitem>
+      <para>
+       Maximum time to cyclically retry all the hosts in the connection string.
+       (as decimal integer number of seconds). If not specified, then
+       hosts are tried just once.
+      </para>
+      <para>
+       If we have replicating cluster, and master node fails, it might
+       take some time to promote one of the standby nodes to the new master.
+       So clients which detect failure to connect to the master might
+       abandon attempts to reestablish a connection before the new master
+       becomes available.
+      </para>
+      <para>
+       Setting this parameter to a value that takes into account the amount of
+       time needed for failover to complete will ensure attempts to connect
+       to hosts continue to be made until the new master becomes available.
+      </para>
+      </listitem>
+     </varlistentry>
+
      <varlistentry id="libpq-connect-client-encoding" xreflabel="client_encoding">
       <term><literal>client_encoding</literal></term>
       <listitem>
