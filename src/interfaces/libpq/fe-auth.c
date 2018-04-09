@@ -540,7 +540,6 @@ pg_SASL_init(PGconn *conn, int payloadlen)
 			char	   *password;
 
 			conn->password_needed = true;
-			// password = conn->connhost[conn->whichhost].password;
 			password = CURRENT_HOST(conn).password;
 			if (password == NULL)
 				password = conn->pgpass;
@@ -952,7 +951,6 @@ pg_fe_sendauth(AuthRequest areq, int payloadlen, PGconn *conn)
 				char	   *password;
 
 				conn->password_needed = true;
-				// password = conn->connhost[conn->whichhost].password;
 				password = CURRENT_HOST(conn).password;
 				if (password == NULL)
 					password = conn->pgpass;
