@@ -35,8 +35,8 @@ OBJS=	fe-auth.o fe-auth-scram.o fe-connect.o fe-exec.o fe-misc.o fe-print.o fe-l
 	fe-protocol2.o fe-protocol3.o pqexpbuffer.o fe-secure.o \
 	libpq-events.o
 # libpgport C files we always use
-OBJS += chklocale.o inet_net_ntop.o noblock.o pgstrcasecmp.o pqsignal.o \
-	thread.o
+OBJS += chklocale.o inet_net_ntop.o noblock.o pgsleep.o pgstrcasecmp.o \
+	pqsignal.o thread.o
 # libpgport C files that are needed if identified by configure
 OBJS += $(filter crypt.o getaddrinfo.o getpeereid.o inet_aton.o open.o system.o snprintf.o strerror.o strlcpy.o win32error.o win32setlocale.o, $(LIBOBJS))
 

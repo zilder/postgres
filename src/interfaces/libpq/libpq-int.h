@@ -374,6 +374,9 @@ struct pg_conn
 	/* Connection order. Possible values: sequential, random */
 	char	   *hostorder;
 
+	char	   *failover_timeout;
+	time_t		failover_finish_time;
+
 	/* Optional file to write trace info to */
 	FILE	   *Pfdebug;
 
