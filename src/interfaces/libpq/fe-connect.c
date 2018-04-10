@@ -2215,7 +2215,7 @@ keep_going:						/* We will come back to here until there is
 						 * ignore socket() failure if we have more addresses
 						 * to try
 						 */
-						if (SHOULD_TRY_NEXT(conn))
+						if (SHOULD_TRY_NEXT_ADDR(conn))
 						{
 							conn->whichaddr++;
 							continue;
