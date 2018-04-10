@@ -423,7 +423,6 @@ struct pg_conn
 	bool		sigpipe_flag;	/* can we mask SIGPIPE via MSG_NOSIGNAL? */
 
 	/* Transient state needed while establishing connection */
-	struct addrinfo *addr_cur;	/* backend address currently being tried */
 	PGSetenvStatusType setenv_state;	/* for 2.0 protocol only */
 	const PQEnvironmentOption *next_eo;
 	bool		send_appname;	/* okay to send application_name? */

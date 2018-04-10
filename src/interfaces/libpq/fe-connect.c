@@ -1882,7 +1882,6 @@ connectDBStart(PGconn *conn)
 	 * Set up to try to connect, with protocol 3.0 as the first attempt.
 	 */
 	conn->whichaddr = 0;
-	conn->addr_cur = conn->connaddr[0].info;
 	conn->pversion = PG_PROTOCOL(3, 0);
 	conn->send_appname = true;
 	conn->status = CONNECTION_NEEDED;
@@ -2000,7 +1999,6 @@ connectDBComplete(PGconn *conn)
 			 * connect_timeout timer
 			 */
 			pqDropConnection(conn, true);
-			conn->addr_cur = CURRENT_HOST(conn).addrlist;
 			conn->status = CONNECTION_NEEDED;
 			if (conn->connect_timeout != NULL)
 				finish_time = time(NULL) + timeout;
@@ -2145,8 +2143,9 @@ keep_going:						/* We will come back to here until there is
 			{
 				/*
 				 * Try to initiate a connection to one of the addresses
-				 * returned by pg_getaddrinfo_all().  conn->addr_cur is the
-				 * next one to try. We fail when we run out of addresses.
+				 * returned by pg_getaddrinfo_all(). conn->whichaddr is the
+				 * index in conn->connaddrs which points to the next address
+				 * to try. We fail when we run out of addresses.
 				 */
 				for (;;)
 				{
@@ -2168,10 +2167,8 @@ keep_going:						/* We will come back to here until there is
 						continue;
 					}
 
-					conn->addr_cur = conn->connaddr[conn->whichaddr].info;
-
 					/* Remember current address for possible error msg */
-					addr_cur = conn->addr_cur;
+					addr_cur = conn->connaddr[conn->whichaddr].info;
 					memcpy(&conn->raddr.addr, addr_cur->ai_addr,
 						   addr_cur->ai_addrlen);
 					conn->raddr.salen = addr_cur->ai_addrlen;
@@ -3609,7 +3606,6 @@ release_all_addrinfo(PGconn *conn)
 			conn->connhost[i].addrlist = NULL;
 		}
 	}
-	conn->addr_cur = NULL;
 }
 
 /*
