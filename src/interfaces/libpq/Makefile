@@ -139,6 +139,9 @@ install: all installdirs install-lib
 installcheck:
 	$(MAKE) -C test $@
 
+check:
+	$(prove_check)
+
 installdirs: installdirs-lib
 	$(MKDIR_P) '$(DESTDIR)$(includedir)' '$(DESTDIR)$(includedir_internal)' '$(DESTDIR)$(datadir)'
 

@@ -401,6 +401,7 @@ sub init
 
 	$params{allows_streaming} = 0 unless defined $params{allows_streaming};
 	$params{has_archiving}    = 0 unless defined $params{has_archiving};
+	$params{use_tcp}          = 0 unless defined $params{use_tcp};
 
 	mkdir $self->backup_dir;
 	mkdir $self->archive_dir;
@@ -451,6 +452,14 @@ sub init
 	{
 		print $conf "unix_socket_directories = '$host'\n";
 		print $conf "listen_addresses = ''\n";
+		if ($params{use_tcp})
+		{
+			print $conf "listen_addresses = '$test_localhost'\n";
+		}
+		else
+		{
+			print $conf "listen_addresses = ''\n";
+		}
 	}
 	close $conf;
 
