@@ -403,7 +403,6 @@ struct pg_conn
 
 	/* Support for multiple hosts in connection string */
 	int			nconnhost;		/* # of possible hosts */
-	// int			whichhost;		/* host we're currently considering */
 	pg_conn_host *connhost;		/* details about each possible host */
 	int			nconnaddr;		/* # of possible addresses */
 	int			whichaddr;		/* address we're currently considering */
