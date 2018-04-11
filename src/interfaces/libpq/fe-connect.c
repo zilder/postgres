@@ -6060,7 +6060,7 @@ PQpass(const PGconn *conn)
 
 	if (!conn)
 		return NULL;
-	if (conn->connhost != NULL)
+	if (conn->connhost != NULL && conn->connaddr != NULL)
 		password = CURRENT_HOST(conn).password;
 	if (password == NULL)
 		password = conn->pgpass;
