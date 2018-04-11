@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 22;
+use Test::More tests => 28;
 
 # Initialize master node
 
@@ -72,10 +72,15 @@ sub connstring2
 	my $database = shift;
 	my $params   = shift;
 	my @args     = ();
+	my @hosts    = ();
+	my @ports    = ();
 	for my $n (@$nodes)
 	{
-		push @args, "host=" . get_host_port($n);
+		push @hosts, $PostgresNode::test_localhost;
+		push @ports, $n->port;
 	}
+	push @args, "host=" . join(",", @hosts);
+	push @args, "port=" . join(",", @ports);
 	push @args, "dbname=$database" if defined($database);
 	while (my ($key, $val) = each %$params)
 	{
