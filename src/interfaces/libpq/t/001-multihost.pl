@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 28;
+use Test::More tests => 22;
 
 # Initialize master node
 
@@ -84,12 +84,147 @@ sub connstring2
 	return join(" ", @args);
 }
 
+sub psql_connstr
+{
+	# We expect dbname to be part of connstr
+	my ($connstr, $sql, %params) = @_;
+
+	my $stdout            = $params{stdout};
+	my $stderr            = $params{stderr};
+	my $timeout           = undef;
+	my $timeout_exception = 'psql timed out';
+	my @psql_params       = ('psql', '-XAtq', '-d', $connstr, '-f', '-');
+
+	# If the caller wants an array and hasn't passed stdout/stderr
+	# references, allocate temporary ones to capture them so we
+	# can return them. Otherwise we won't redirect them at all.
+	if (wantarray)
+	{
+		if (!defined($stdout))
+		{
+			my $temp_stdout = "";
+			$stdout = \$temp_stdout;
+		}
+		if (!defined($stderr))
+		{
+			my $temp_stderr = "";
+			$stderr = \$temp_stderr;
+		}
+	}
+
+	$params{on_error_stop} = 1 unless defined $params{on_error_stop};
+	$params{on_error_die}  = 0 unless defined $params{on_error_die};
+
+	push @psql_params, '-v', 'ON_ERROR_STOP=1' if $params{on_error_stop};
+	push @psql_params, @{ $params{extra_params} }
+	  if defined $params{extra_params};
+
+	$timeout =
+	  IPC::Run::timeout($params{timeout}, exception => $timeout_exception)
+	  if (defined($params{timeout}));
+
+	${ $params{timed_out} } = 0 if defined $params{timed_out};
+
+	# IPC::Run would otherwise append to existing contents:
+	$$stdout = "" if ref($stdout);
+	$$stderr = "" if ref($stderr);
+
+	my $ret;
+
+   # Run psql and capture any possible exceptions.  If the exception is
+   # because of a timeout and the caller requested to handle that, just return
+   # and set the flag.  Otherwise, and for any other exception, rethrow.
+   #
+   # For background, see
+   # http://search.cpan.org/~ether/Try-Tiny-0.24/lib/Try/Tiny.pm
+	do
+	{
+		local $@;
+		eval {
+			my @ipcrun_opts = (\@psql_params, '<', \$sql);
+			push @ipcrun_opts, '>',  $stdout if defined $stdout;
+			push @ipcrun_opts, '2>', $stderr if defined $stderr;
+			push @ipcrun_opts, $timeout if defined $timeout;
+
+			IPC::Run::run @ipcrun_opts;
+			$ret = $?;
+		};
+		my $exc_save = $@;
+		if ($exc_save)
+		{
+
+			# IPC::Run::run threw an exception. re-throw unless it's a
+			# timeout, which we'll handle by testing is_expired
+			die $exc_save
+			  if (blessed($exc_save) || $exc_save ne $timeout_exception);
+
+			$ret = undef;
+
+			die "Got timeout exception '$exc_save' but timer not expired?!"
+			  unless $timeout->is_expired;
+
+			if (defined($params{timed_out}))
+			{
+				${ $params{timed_out} } = 1;
+			}
+			else
+			{
+				die "psql timed out: stderr: '$$stderr'\n"
+				  . "while running '@psql_params'";
+			}
+		}
+	};
+
+	if (defined $$stdout)
+	{
+		chomp $$stdout;
+		$$stdout =~ s/\r//g if $TestLib::windows_os;
+	}
+
+	if (defined $$stderr)
+	{
+		chomp $$stderr;
+		$$stderr =~ s/\r//g if $TestLib::windows_os;
+	}
+
+	# See http://perldoc.perl.org/perlvar.html#%24CHILD_ERROR
+	# We don't use IPC::Run::Simple to limit dependencies.
+	#
+	# We always die on signal.
+	my $core = $ret & 128 ? " (core dumped)" : "";
+	die "psql exited with signal "
+	  . ($ret & 127)
+	  . "$core: '$$stderr' while running '@psql_params'"
+	  if $ret & 127;
+	$ret = $ret >> 8;
+
+	if ($ret && $params{on_error_die})
+	{
+		die "psql error: stderr: '$$stderr'\nwhile running '@psql_params'"
+		  if $ret == 1;
+		die "connection error: '$$stderr'\nwhile running '@psql_params'"
+		  if $ret == 2;
+		die "error running SQL: '$$stderr'\nwhile running '@psql_params'"
+		  if $ret == 3;
+		die "psql returns $ret: '$$stderr'\nwhile running '@psql_params'";
+	}
+
+	if (wantarray)
+	{
+		return ($ret, $$stdout, $$stderr);
+	}
+	else
+	{
+		return $ret;
+	}
+}
+
 sub psql_conninfo
 {
 	my ($connstr) = shift;
 	my ($timed_out);
 	my ($retcode, $stdout, $stderr) =
-	  psql($connstr, '\conninfo', timed_out => \$timed_out);
+	  psql_connstr($connstr, '\conninfo', timed_out => \$timed_out);
 	if ($retcode == 0 && $stdout =~ /on host "([^"]*)" at port "([^"]*)"/s)
 	{
 		return "$1:$2";
@@ -107,7 +242,7 @@ sub psql_server_addr
 	my $sql =
 	  "select abbrev(inet_server_addr()) ||':'||inet_server_port();\n";
 	my ($retcode, $stdout, $stderr) =
-	  psql($connstr, $sql, timed_out => \$timed_out);
+	  psql_connstr($connstr, $sql, timed_out => \$timed_out);
 	if ($retcode == 0)
 	{
 		return $stdout;
@@ -118,11 +253,13 @@ sub psql_server_addr
 	}
 }
 my $conninfo;
+my $expected;
 
 # Test 1.1 - all hosts available, master first, readwrite requested
 $conninfo =
   psql_conninfo(
 	multiconnstring([ $node_master, $node_standby_1, $node_standby_2 ]));
+is(1, 1, "test");
 is($conninfo, get_host_port($node_master), "master first, rw, conninfo");
 
 # Test 1.2
@@ -131,7 +268,7 @@ $conninfo =
 	multiconnstring([ $node_master, $node_standby_1, $node_standby_2 ]));
 is($conninfo, get_host_port($node_master), "master first, rw, server funcs");
 
-# Test 2.1 - use symbolic name for master and IP for slave
+# Test 2.1 - use symbolic name for master and IP for standby
 $conninfo =
   psql_conninfo("postgresql://localhost:"
 	  . $node_master->port
@@ -157,27 +294,32 @@ is( $conninfo,
 # Test 3.1 - all nodes available, master second, readwrite requested
 $conninfo =
   psql_conninfo(
-	multiconnstring([ $node_standby_1, $node_master, $node_standby_2 ]));
+	multiconnstring(
+		[ $node_standby_1, $node_master, $node_standby_2 ],
+		undef, { target_session_attrs => "read-write" }));
 
-is($conninfo, get_host_port($node_master), "master second,rw, conninfo");
+is($conninfo, get_host_port($node_master), "master second, rw, conninfo");
 
 # Test 3.2 Check server-side connection info
 $conninfo =
   psql_server_addr(
-	multiconnstring([ $node_standby_1, $node_master, $node_standby_2 ]));
+	multiconnstring(
+		[ $node_standby_1, $node_master, $node_standby_2 ],
+		undef, { target_session_attrs => "read-write" }));
 
 is($conninfo, get_host_port($node_master), "master second, rw, server funcs");
 
-# Test 4.1 - use symbolic name for slave and IP for smaster
+# Test 4.1 - use symbolic name for standby and IP for master
 $conninfo =
   psql_conninfo("postgresql://localhost:"
 	  . $node_standby_1->port
 	  . ",127.0.0.1:"
 	  . $node_master->port
-	  . "/postgres");
+	  . "/postgres"
+	  . "?target_session_attrs=read-write");
 is( $conninfo,
 	"127.0.0.1:" . $node_master->port,
-	"slave symbolic, rw,conninfo");
+	"standby symbolic, rw, conninfo");
 
 # Test 4.2 - check server-side connect info
 $conninfo =
@@ -185,25 +327,24 @@ $conninfo =
 	  . $node_standby_1->port
 	  . ",127.0.0.1:"
 	  . $node_master->port
-	  . "/postgres");
+	  . "/postgres"
+	  . "?target_session_attrs=read-write");
 is( $conninfo,
 	"127.0.0.1:" . $node_master->port,
-	"slave symbolic rw, server funcs");
+	"standby symbolic rw, server funcs");
 
 # Test 5 - all nodes available, master first, readonly requested
 
 $conninfo = psql_conninfo(
 	multiconnstring(
-		[ $node_master, $node_standby_1, $node_standby_2 ],
-		undef, { target_server_type => 'any' }));
+		[ $node_master, $node_standby_1, $node_standby_2 ]));
 
 is($conninfo, get_host_port($node_master), "master first, ro, conninfo");
 
 # Test 6 - all nodes available, master second, readonly requested
 $conninfo = psql_conninfo(
 	multiconnstring(
-		[ $node_standby_1, $node_master, $node_standby_2 ],
-		undef, { target_server_type => 'any' }));
+		[ $node_standby_1, $node_master, $node_standby_2 ]));
 
 is($conninfo, get_host_port($node_standby_1), "master second, ro conninfo");
 
@@ -218,26 +359,26 @@ for (my $i = 0; $i < 9; $i++)
 		multiconnstring(
 			[ $node_master, $node_standby_1, $node_standby_2 ],
 			undef,
-			{ target_server_type => 'any', hostorder => 'random' }));
+			{ target_session_attrs => 'any', hostorder => 'random' }));
 	$conncount{$conn}++;
 }
 is(scalar(keys(%conncount)), 3, 'random order, readonly connect');
 
 # Test 7.2 - alternate (jdbc compatible) syntax for randomized hosts
 
-for (my $i = 0; $i < 6; $i++)
-{
-	my $conn = psql_conninfo(
-		multiconnstring(
-			[ $node_master, $node_standby_1, $node_standby_2 ],
-			undef,
-			{ targetServerType => 'any', loadBalanceHosts => "true" }));
-	$conncount{$conn}++;
-}
+# for (my $i = 0; $i < 6; $i++)
+# {
+# 	my $conn = psql_conninfo(
+# 		multiconnstring(
+# 			[ $node_master, $node_standby_1, $node_standby_2 ],
+# 			undef,
+# 			{ targetServerType => 'any', loadBalanceHosts => "true" }));
+# 	$conncount{$conn}++;
+# }
 
-#diag(join(",",keys %conncount));
-is(scalar(keys %conncount),
-	3, "alternate JDBC-compatible syntax for random order");
+# #diag(join(",",keys %conncount));
+# is(scalar(keys %conncount),
+# 	3, "alternate JDBC-compatible syntax for random order");
 
 # Test 8 - all nodes available, random order, readwrite
 # Expect all six connections go to the master
@@ -261,36 +402,48 @@ $conninfo = psql_conninfo(multiconnstring([$node_master]));
 is($conninfo, get_host_port($node_master), "old behavoir compat - master");
 
 
-# Test 8.2 one host in URL, slave
+# Test 8.2 one host in URL, standby
 $conninfo = psql_conninfo(multiconnstring([$node_standby_1]));
-is($conninfo, get_host_port($node_standby_1), "old behavoir compat - slave");
+is($conninfo, get_host_port($node_standby_1), "old behavoir compat - standby");
 
-# Test 9 - try to connect only slaves in rw mode
+# Test 9 - try to connect only standbys in rw mode
 
 $conninfo =
-  psql_conninfo(multiconnstring([ $node_standby_1, $node_standby_2 ]));
+	psql_conninfo(
+		multiconnstring(
+			[ $node_standby_1, $node_standby_2 ],
+			undef, { target_session_attrs => "read-write" }));
+$expected = "STDOUT:\nSTDERR:psql: "
+	. "could not make a writable connection to server "
+	. "\"" . get_host_port($node_standby_1) . "\"\n"
+	. "could not make a writable connection to server "
+	. "\"" . get_host_port($node_standby_2) . "\"";
 is( $conninfo,
-"STDOUT:\nSTDERR:psql: cannot make RW connection to hot standby node 127.0.0.1",
-	"cannot connect just slaves in RW mode");
+	$expected,
+	"cannot connect just standbys in RW mode");
 
 
 
-# Test 10 - one of slaves is not available
+# Test 10 - one of standbys is not available
 $node_standby_1->stop();
 
 # Test 10.1
 
 $conninfo =
-  psql_conninfo(
-	multiconnstring([ $node_standby_1, $node_master, $node_standby_2 ]));
+	psql_conninfo(
+		multiconnstring(
+			[ $node_standby_1, $node_master, $node_standby_2 ],
+			undef, { target_session_attrs => "read-write" }));
 
-is($conninfo, get_host_port($node_master), "first node is unavailable");
+is($conninfo, get_host_port($node_master), "first node is unavailable: $conninfo, " . get_host_port($node_master));
 
 # Test 10.2
 
 $conninfo =
-  psql_conninfo(
-	multiconnstring([ $node_standby_2, $node_standby_1, $node_master ]));
+	psql_conninfo(
+		multiconnstring(
+			[ $node_standby_2, $node_standby_1, $node_master ],
+			undef, { target_session_attrs => "read-write" }));
 
 is( $conninfo,
 	get_host_port($node_master),
@@ -300,8 +453,7 @@ is( $conninfo,
 
 $conninfo = psql_conninfo(
 	multiconnstring(
-		[ $node_standby_1, $node_standby_2, $node_master ],
-		undef, { target_server_type => 'any' }));
+		[ $node_standby_1, $node_standby_2, $node_master ]));
 is( $conninfo,
 	get_host_port($node_standby_2),
 	"first node unavailable, second standmby, readonly mode");
@@ -312,17 +464,34 @@ $node_master->stop();
 
 $conninfo =
   psql_conninfo(
-	multiconnstring([ $node_standby_1, $node_master, $node_standby_2 ]));
-
+	multiconnstring(
+		[ $node_standby_1, $node_master, $node_standby_2 ],
+		undef, { target_session_attrs => "read-write" }));
+$expected = "STDOUT:\nSTDERR:psql: "
+	. "could not make a writable connection to server "
+	. "\"" . get_host_port($node_standby_1) . "\"\n"
+	. "could not connect to server: Connection refused\n"
+	. "\tIs the server running on host \"127.0.0.1\" and accepting\n"
+	. "\tTCP/IP connections on port " . $node_master->port . "?\n"
+	. "could not make a writable connection to server "
+	. "\"" . get_host_port($node_standby_2) . "\"";
+my $i;
+my $len = length $expected;
+for ($i = 0; $i < $len; $i++)
+{
+	if (substr($expected, $i-1, $i) != substr($conninfo, $i-1, $i))
+	{
+		last;
+	}
+}
 is( $conninfo,
-"STDOUT:\nSTDERR:psql: cannot make RW connection to hot standby node 127.0.0.1",
-	"master unavialble, cannot connect just slaves in RW mode");
+	$expected,
+	"master unavialble, cannot connect just standbys in RW mode");
 
 $conninfo = psql_conninfo(
 	multiconnstring(
 		[ $node_master, $node_standby_1, $node_standby_2 ],
-		undef, { target_server_type => 'any' }));
-
+		undef, { target_session_attrs => 'any' }));
 is( $conninfo,
 	get_host_port($node_standby_1),
 	"Master unavailable, read only ");
@@ -354,7 +523,7 @@ is( $conninfo,
 $conninfo = psql_conninfo(
 	connstring2(
 		[ $node_standby_1, $node_standby_2, $node_master ],
-		undef, { target_server_type => 'any' }));
+		undef, { target_session_attrs => 'any' }));
 
 is( $conninfo,
 	get_host_port($node_standby_1),
@@ -365,7 +534,7 @@ is( $conninfo,
 $conninfo = psql_conninfo(
 	connstring2(
 		[ $node_master, $node_standby_1, $node_standby_2 ],
-		undef, { target_server_type => 'any' }));
+		undef, { target_session_attrs => 'any' }));
 
 is( $conninfo,
 	get_host_port($node_master),
@@ -379,11 +548,8 @@ is( $conninfo,
 	"alt syntax old behavoir compat - master");
 
 
-# Test 11.6 one host in URL, slave
+# Test 11.6 one host in URL, standby
 $conninfo = psql_conninfo(connstring2([$node_standby_1]));
 is( $conninfo,
 	get_host_port($node_standby_1),
-	"alt syntax old behavoir compat - slave");
-
-
-
+	"alt syntax old behavoir compat - standby");
