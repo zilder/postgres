@@ -475,15 +475,6 @@ $expected = "STDOUT:\nSTDERR:psql: "
 	. "\tTCP/IP connections on port " . $node_master->port . "?\n"
 	. "could not make a writable connection to server "
 	. "\"" . get_host_port($node_standby_2) . "\"";
-my $i;
-my $len = length $expected;
-for ($i = 0; $i < $len; $i++)
-{
-	if (substr($expected, $i-1, $i) != substr($conninfo, $i-1, $i))
-	{
-		last;
-	}
-}
 is( $conninfo,
 	$expected,
 	"master unavialble, cannot connect just standbys in RW mode");
@@ -501,8 +492,10 @@ $node_master->start();
 # Test 11 Alternate syntax
 
 $conninfo =
-  psql_conninfo(
-	connstring2([ $node_standby_1, $node_standby_2, $node_master ]));
+	psql_conninfo(
+		connstring2(
+			[ $node_standby_1, $node_standby_2, $node_master ],
+			undef, { target_session_attrs => "read-write" }));
 
 is( $conninfo,
 	get_host_port($node_master),
@@ -511,8 +504,10 @@ is( $conninfo,
 
 
 $conninfo =
-  psql_conninfo(
-	connstring2([ $node_master, $node_standby_1, $node_standby_2 ]));
+	psql_conninfo(
+		connstring2(
+			[ $node_master, $node_standby_1, $node_standby_2 ],
+			undef, { target_session_attrs => "read-write" }));
 
 is( $conninfo,
 	get_host_port($node_master),
@@ -553,3 +548,4 @@ $conninfo = psql_conninfo(connstring2([$node_standby_1]));
 is( $conninfo,
 	get_host_port($node_standby_1),
 	"alt syntax old behavoir compat - standby");
+
