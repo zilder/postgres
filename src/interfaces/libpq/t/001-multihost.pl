@@ -3,7 +3,7 @@ use strict;
 use warnings;
 use PostgresNode;
 use TestLib;
-use Test::More tests => 28;
+use Test::More tests => 29;
 
 # Initialize master node
 
@@ -354,11 +354,11 @@ $conninfo = psql_conninfo(
 is($conninfo, get_host_port($node_standby_1), "master second, ro conninfo");
 
 # Test 7.1 - all nodes available, random order, readonly.
-# Expect that during six attempts any of three nodes would be collected
+# Expect that during twelve attempts any of three nodes would be collected
 # at least once
 
 my %conncount = ();
-for (my $i = 0; $i < 9; $i++)
+for (my $i = 0; $i < 12; $i++)
 {
 	my $conn = psql_conninfo(
 		multiconnstring(
@@ -371,19 +371,19 @@ is(scalar(keys(%conncount)), 3, 'random order, readonly connect');
 
 # Test 7.2 - alternate (jdbc compatible) syntax for randomized hosts
 
-# for (my $i = 0; $i < 6; $i++)
-# {
-# 	my $conn = psql_conninfo(
-# 		multiconnstring(
-# 			[ $node_master, $node_standby_1, $node_standby_2 ],
-# 			undef,
-# 			{ targetServerType => 'any', loadBalanceHosts => "true" }));
-# 	$conncount{$conn}++;
-# }
+for (my $i = 0; $i < 6; $i++)
+{
+	my $conn = psql_conninfo(
+		multiconnstring(
+			[ $node_master, $node_standby_1, $node_standby_2 ],
+			undef,
+			{ targetServerType => 'any', loadBalanceHosts => "true" }));
+	$conncount{$conn}++;
+}
 
-# #diag(join(",",keys %conncount));
-# is(scalar(keys %conncount),
-# 	3, "alternate JDBC-compatible syntax for random order");
+#diag(join(",",keys %conncount));
+is(scalar(keys %conncount),
+	3, "alternate JDBC-compatible syntax for random order");
 
 # Test 8 - all nodes available, random order, readwrite
 # Expect all six connections go to the master
