@@ -1535,13 +1535,14 @@ postgresql://%2Fvar%2Flib%2Fpostgresql/dbname
 
      <varlistentry id="libpq-connect-target-session-attrs" xreflabel="target_session_attrs">
       <term><literal>target_session_attrs</literal></term>
+      <term><literal>target_server_type (synonym)</literal></term>
       <listitem>
        <para>
-        If this parameter is set to <literal>read-write</literal>, only a
-        connection in which read-write transactions are accepted by default
-        is considered acceptable.  The query
-        <literal>SHOW transaction_read_only</literal> will be sent upon any
-        successful connection; if it returns <literal>on</>, the connection
+        If this parameter is set to <literal>read-write</literal> (or its
+        equivalent <literal>master</literal>, only a connection in which
+        read-write transactions are accepted by default is considered acceptable.
+        The query <literal>SHOW transaction_read_only</literal> will be sent upon
+        any successful connection; if it returns <literal>on</>, the connection
         will be closed.  If multiple hosts were specified in the connection
         string, any remaining servers will be tried just as if the connection
         attempt had failed.  The default value of this parameter,

@@ -330,6 +330,14 @@ static const internalPQconninfoOption PQconninfoOptions[] = {
 		DefaultTargetSessionAttrs, NULL,
 		"Target-Session-Attrs", "", 11, /* sizeof("read-write") = 11 */
 	offsetof(struct pg_conn, target_session_attrs)},
+	/*
+	 * Same as target_session_attrs for backward compatibility with PGPROEE 9.6.
+	 * Along with "read-write" value it also recognizes "master".
+	 */
+	{"target_server_type", NULL, NULL, NULL,
+		"Target server type", "", 11,
+	offsetof(struct pg_conn, target_session_attrs)},
+
 
 	{"hostorder", NULL, DefaultHostorder, NULL,
 		"Hostorder", "", 10, /* sizeof("sequential") = 10 */
@@ -1197,11 +1205,12 @@ connectOptions2(PGconn *conn)
 	if (conn->target_session_attrs)
 	{
 		if (strcmp(conn->target_session_attrs, "any") != 0
-			&& strcmp(conn->target_session_attrs, "read-write") != 0)
+			&& strcmp(conn->target_session_attrs, "read-write") != 0
+			&& strcmp(conn->target_session_attrs, "master") != 0)
 		{
 			conn->status = CONNECTION_BAD;
 			printfPQExpBuffer(&conn->errorMessage,
-							  libpq_gettext("invalid target_session_attrs value: \"%s\"\n"),
+							  libpq_gettext("invalid target_session_attrs (aka target_server_type) value: \"%s\"\n"),
 							  conn->target_session_attrs);
 			return false;
 		}
@@ -2178,7 +2187,8 @@ keep_going:						/* We will come back to here until there is
 							 * Reset readonly flag for all hosts as one of
 							 * them might have been promoted
 							 */
-							if (strcmp(conn->target_session_attrs, "read-write") == 0)
+							if (strcmp(conn->target_session_attrs, "read-write") == 0 ||
+								strcmp(conn->target_session_attrs, "master") == 0)
 							{
 								int i;
 
@@ -2194,9 +2204,10 @@ keep_going:						/* We will come back to here until there is
 					 * If read-write connection is required check whether
 					 * host was already marked as read-only
 					 */
-					if (conn->target_session_attrs != NULL
-						&& strcmp(conn->target_session_attrs, "read-write") == 0
-						&& CURRENT_HOST(conn).readonly)
+					if (conn->target_session_attrs != NULL &&
+						(strcmp(conn->target_session_attrs, "read-write") == 0 ||
+						 strcmp(conn->target_session_attrs, "master") == 0) &&
+						CURRENT_HOST(conn).readonly)
 					{
 						conn->whichaddr++;
 						continue;
@@ -3088,7 +3099,8 @@ keep_going:						/* We will come back to here until there is
 				 * If a read-write connection is required, see if we have one.
 				 */
 				if (conn->target_session_attrs != NULL &&
-					strcmp(conn->target_session_attrs, "read-write") == 0)
+					(strcmp(conn->target_session_attrs, "read-write") == 0 ||
+					 strcmp(conn->target_session_attrs, "master") == 0))
 				{
 					/*
 					 * We are yet to make a connection. Save all existing
@@ -3152,7 +3164,8 @@ keep_going:						/* We will come back to here until there is
 			 * If a read-write connection is requested check for same.
 			 */
 			if (conn->target_session_attrs != NULL &&
-				strcmp(conn->target_session_attrs, "read-write") == 0)
+				(strcmp(conn->target_session_attrs, "read-write") == 0 ||
+				 strcmp(conn->target_session_attrs, "master") == 0))
 			{
 				if (!saveErrorMessage(conn, &savedMessage))
 					goto error_return;
@@ -5766,6 +5779,21 @@ conninfo_uri_parse_params(char *params,
 
 			keyword = "sslmode";
 			value = "require";
+		}
+		if ((strcmp(keyword, "loadBalanceHosts") == 0 ||
+			 strcmp(keyword, "load_balance_hosts") == 0) &&
+			strcmp(value, "true") == 0)
+		{
+			free(keyword);
+			free(value);
+			malloced = false;
+			keyword = "hostorder";
+			value = "random";
+		}
+		if (strcmp(keyword, "targetServerType") == 0)
+		{
+			free(keyword);
+			keyword = strdup("target_session_attrs");
 		}
 
 		/*
