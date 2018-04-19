@@ -207,3 +207,16 @@ extern bool function_parse_error_transpose(const char *prosrc);
 extern List *oid_array_to_list(Datum datum);
 
 #endif							/* PG_PROC_H */
+// <<<<<<<
+// =======
+// DESCR("convert timestamp with time zone to time");
+// DATA(insert OID = 2020 (  date_trunc		PGNSP PGUID 12 1 0 0 0 f f f t f i s 2 0 1114 "25 1114" _null_ _null_ _null_ _null_ _null_ timestamp_trunc _null_ _null_ _null_ ));
+// DESCR("truncate timestamp to specified units");
+// #define OID_TIMESTAMP_TRUNC 2020
+// DATA(insert OID = 6020 (  date_trunc_up		PGNSP PGUID 12 1 0 0 0 f f f t f i s 3 0 1114 "25 1114 16" _null_ _null_ _null_ _null_ _null_ timestamp_trunc_up _null_ _null_ _null_ ));
+// DESCR("truncate timestamp to specified units, rounding up");
+// #define OID_TIMESTAMP_TRUNC_UP 6020
+// DATA(insert OID = 2021 (  date_part			PGNSP PGUID 12 1 0 0 0 f f f t f i s 2 0 701 "25 1114" _null_ _null_ _null_ _null_ _null_ timestamp_part _null_ _null_ _null_ ));
+// DESCR("extract field from timestamp");
+// DATA(insert OID = 2023 (  timestamp			PGNSP PGUID 12 1 0 0 0 f f f t f s s 1 0 1114 "702" _null_ _null_ _null_ _null_ _null_ abstime_timestamp _null_ _null_ _null_ ));
+// >>>>>>>

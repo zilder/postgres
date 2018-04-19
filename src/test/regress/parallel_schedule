@@ -29,8 +29,9 @@ test: point lseg line box path polygon circle date time timetz timestamp timesta
 # Another group of parallel tests
 # geometry depends on point, lseg, box, path, polygon and circle
 # horology depends on interval, timetz, timestamp, timestamptz, reltime and abstime
+# date_trunc_optimization depends on date, timestamp
 # ----------
-test: geometry horology regex oidjoins type_sanity opr_sanity misc_sanity comments expressions
+test: geometry horology regex oidjoins type_sanity opr_sanity misc_sanity comments expressions date_trunc_optimization
 
 # ----------
 # These four each depend on the previous one

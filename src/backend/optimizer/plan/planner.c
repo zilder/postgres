@@ -17,12 +17,14 @@
 
 #include <limits.h>
 #include <math.h>
+#include <parser/scansup.h>
 
 #include "access/htup_details.h"
 #include "access/parallel.h"
 #include "access/sysattr.h"
 #include "access/xact.h"
 #include "catalog/pg_constraint.h"
+#include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
 #include "executor/executor.h"
@@ -53,10 +55,12 @@
 #include "parser/parse_agg.h"
 #include "rewrite/rewriteManip.h"
 #include "storage/dsm_impl.h"
+#include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/selfuncs.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+
 
 
 /* GUC parameters */
@@ -237,6 +241,7 @@ static void create_partitionwise_grouping_paths(PlannerInfo *root,
 static bool group_by_has_partkey(RelOptInfo *input_rel,
 					 List *targetList,
 					 List *groupClause);
+static Node *rewrite_date_trunc_comparisons(Node *node, void *context);
 
 
 /*****************************************************************************
@@ -991,6 +996,156 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 }
 
 /*
+ * Check if current operator should be always rounded up in date_trunc_up,
+ * if first argument is date_trunc functional expression (applicable to: '<=', '>').
+ */
+#define IsLeftTruncAlwaysUp(opno) \
+	((opno == OID_TS_LEE_TS_OP) || (opno == OID_TS_GR_TS_OP))
+
+/*
+ * Check if provided operator should be optimized for date_trunc usage.
+ * Applicable to '<=', '>=', '>', '<'.
+ */
+#define IsTruncOptimizableComp(opno) (IsLeftTruncAlwaysUp(opno) || \
+	(opno == OID_TS_LE_TS_OP) || (opno == OID_TS_GRE_TS_OP))
+
+/*
+ * rewrite_date_trunc_comparisons
+ *		Rewrite date_trunc functional expression comparison with timestamp
+ *		arguments with index-aware operations.
+ *		Replace with new node, saving result, but with
+ *		date_trunc_up comparison to raw value.
+ */
+static Node *
+rewrite_date_trunc_comparisons(Node *node, void *context)
+{
+	OpExpr	  *expr;
+	Oid		   opno;
+	List	  *args;
+	FuncExpr  *func = NULL;
+	bool	   dtsecond = false;
+	Node	  *first_arg;
+	Node	  *second_arg;
+	FuncExpr  *ffirst;
+	FuncExpr  *fsecond;
+	Node	  *threshold_arg = NULL;
+	List	  *func_args;
+	Node	  *units_arg;
+	Node	  *truncated_arg;
+	bool	   always_up;
+	FuncExpr  *new_func;
+	Node	  *new_first_arg;
+	Node	  *new_second_arg;
+	Oid		   new_op;
+	Oid 	   new_funcid = F_TIMESTAMP_TRUNC_UP;
+	OpExpr	  *new_expr;
+
+	if (node == NULL)
+		return NULL;
+
+	if (!IsA(node, OpExpr))
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	expr = (OpExpr *) node;
+	opno = expr->opno;
+
+	if (!IsTruncOptimizableComp(opno))
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	args = expr->args;
+
+	/*
+	 * Not a binary operator.
+	 */
+	if (list_length(args) != 2)
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	/*
+	 * Find position of date_trunc functional expression argument.
+	 */
+	first_arg = (Node *) linitial(args);
+	second_arg = (Node *) lsecond(args);
+
+	if (IsA(first_arg, FuncExpr)) {
+		ffirst = (FuncExpr *) first_arg;
+
+		if (ffirst->funcid == F_TIMESTAMP_TRUNC) {
+			func = ffirst;
+			threshold_arg = second_arg;
+		}
+	}
+
+	if (!func && IsA(second_arg, FuncExpr)) {
+		fsecond = (FuncExpr *) second_arg;
+
+		if (fsecond->funcid == F_TIMESTAMP_TRUNC) {
+			dtsecond = true;
+			func = fsecond;
+			threshold_arg = first_arg;
+		}
+	}
+
+	/*
+	 * Not found date_trunc, continue recursively.
+	 */
+	if (!func)
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	func_args = func->args;
+	if (list_length(func_args) != 2)
+		/*
+		 * This is probably not possible, date_trunc requires two arguments.
+		 */
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	elog(NOTICE, "Applying date_trunc optimization...");
+
+	always_up = dtsecond != IsLeftTruncAlwaysUp(opno);
+	switch (opno)
+	{
+		/*
+		 * Extend for new data types handling.
+		 * '>', '>=' converts into '>' if date_trunc is second argument, '>=' otherwise.
+		 * '<', '<=' converts into '<=' if date_trunc is second argument, '<' otherwise.
+		 */
+		// Timestamps comparison
+		case OID_TS_GR_TS_OP:
+		case OID_TS_GRE_TS_OP:
+			new_op = dtsecond ? OID_TS_GR_TS_OP : OID_TS_GRE_TS_OP;
+			break;
+		case OID_TS_LE_TS_OP:
+		case OID_TS_LEE_TS_OP:
+			new_op = dtsecond ? OID_TS_LEE_TS_OP : OID_TS_LE_TS_OP;
+			break;
+		default:
+			return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+	}
+
+	/*
+	 * Build the new date_trunc function call (now on the other side of the comparison).
+	 */
+	units_arg = linitial(func_args);
+	new_func = copyObject(func);
+	new_func->funcid = new_funcid;
+	new_func->args = list_make3(units_arg, threshold_arg, makeBoolConst(always_up, false));
+	new_func->location = -1;
+
+	/*
+	 * Build the new comparison operator expression.
+	 */
+	truncated_arg = lsecond(func_args);
+	new_first_arg  = dtsecond ? (Node *) new_func : truncated_arg;
+	new_second_arg = dtsecond ? truncated_arg : (Node *) new_func;
+
+	new_expr = copyObject(expr);
+	new_expr->opno = new_op;
+	new_expr->opfuncid = InvalidOid;
+	new_expr->args = list_make2(new_first_arg, new_second_arg);
+	new_expr->location = -1;
+	return (Node *) new_expr;
+}
+
+/*
  * preprocess_expression
  *		Do subquery_planner's preprocessing work for an expression,
  *		which can be a targetlist, a WHERE clause (including JOIN/ON
@@ -1022,6 +1177,15 @@ preprocess_expression(PlannerInfo *root, Node *expr, int kind)
 		  kind == EXPRKIND_TABLESAMPLE ||
 		  kind == EXPRKIND_TABLEFUNC))
 		expr = flatten_join_alias_vars(root, expr);
+
+	/*
+	 * Rewrite `date_trunc(part, indexed_column) <comparison_op> value`
+	 * comparisons.
+	 *
+	 * Do this before const expression evaluation as rewriting can introduce
+	 * new constant expressions.
+	 */
+	expr = rewrite_date_trunc_comparisons(expr, NULL);
 
 	/*
 	 * Simplify constant expressions.

@@ -52,6 +52,7 @@ test: opr_sanity
 test: misc_sanity
 test: comments
 test: expressions
+test: date_trunc_optimization
 test: insert
 test: insert_conflict
 test: create_function_1

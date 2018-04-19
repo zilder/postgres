@@ -3767,6 +3767,294 @@ timestamptz_age(PG_FUNCTION_ARGS)
  *	Conversion operators.
  *---------------------------------------------------------*/
 
+/* timestamp_trunc_up()
+ * Truncate timestamp to specified units, rounding up.
+ * Optionally round up (add one unit) even when already round.
+ */
+Datum
+timestamp_trunc_up(PG_FUNCTION_ARGS)
+{
+	text	   *units = PG_GETARG_TEXT_PP(0);
+	Timestamp	timestamp = PG_GETARG_TIMESTAMP(1);
+	bool		always_up = PG_GETARG_BOOL(2);
+	Timestamp	result;
+	int			type,
+				val;
+	char	   *lowunits;
+	fsec_t		fsec;
+	struct pg_tm tt,
+			   *tm = &tt;
+
+	if (TIMESTAMP_NOT_FINITE(timestamp))
+		PG_RETURN_TIMESTAMP(timestamp);
+
+	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
+											VARSIZE_ANY_EXHDR(units),
+											false);
+
+	type = DecodeUnits(0, lowunits, &val);
+
+	if (type == UNITS)
+	{
+		if (timestamp2tm(timestamp, NULL, tm, &fsec, NULL, NULL) != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+							errmsg("timestamp out of range")));
+
+		switch (val)
+		{
+			case DTK_WEEK:
+			{
+				int woy = date2isoweek(tm->tm_year, tm->tm_mon, tm->tm_mday);
+				int tm_year = tm->tm_year;
+				int tm_mon = tm->tm_mon;
+				int tm_mday = tm->tm_mday;
+
+				if (woy >= 52 && tm->tm_mon == 1)
+					--tm->tm_year;
+				if (woy <= 1 && tm->tm_mon == MONTHS_PER_YEAR)
+					++tm->tm_year;
+
+				isoweek2date(woy, &(tm->tm_year), &(tm->tm_mon), &(tm->tm_mday));
+
+				if (tm->tm_year != tm_year || tm->tm_mon != tm_mon || tm->tm_mday != tm_mday || tm->tm_hour > 0 ||
+						tm->tm_min > 0 || tm->tm_sec > 0 || fsec > 0 || always_up)
+					isoweek2date(woy + 1, &(tm->tm_year), &(tm->tm_mon), &(tm->tm_mday));
+
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+			}
+			case DTK_MILLENNIUM: {
+				bool up = tm->tm_mon > 1 || tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 ||
+						fsec > 0 || always_up;
+
+				/* see comments in timestamptz_trunc */
+				if (tm->tm_year > 0)
+				{
+					if (up || (tm->tm_year % 1000) != 1)
+						tm->tm_year += 1000;
+
+					tm->tm_year = ((tm->tm_year + 999) / 1000) * 1000 - 999;
+				}
+				else
+				{
+					if (tm->tm_year > -1000)
+						tm->tm_year = 1;
+					else
+					{
+						if (up || (tm->tm_year % 1000) != 0)
+							tm->tm_year += 1000;
+
+						tm->tm_year = -((999 - (tm->tm_year - 1)) / 1000) * 1000 + 1;
+					}
+				}
+
+				tm->tm_mon = 1;
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+			}
+			case DTK_CENTURY: {
+				/* see comments in timestamptz_trunc */
+				bool up = tm->tm_mon > 1 || tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 ||
+						  fsec > 0 || always_up;
+
+				/* see comments in timestamptz_trunc */
+				if (tm->tm_year > 0) {
+					if (up || (tm->tm_year % 100) != 1)
+						tm->tm_year += 100;
+
+					tm->tm_year = ((tm->tm_year + 99) / 100) * 100 - 99;
+				}
+				else
+				{
+					if (tm->tm_year > -100)
+						tm->tm_year = 1;
+					else
+					{
+						if (up || (tm->tm_year % 100) != 0)
+							tm->tm_year += 100;
+
+						tm->tm_year = -((99 - (tm->tm_year - 1)) / 100) * 100 + 1;
+					}
+				}
+
+				tm->tm_mon = 1;
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+			}
+			case DTK_DECADE: {
+				bool up = tm->tm_mon > 1 || tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 ||
+						  fsec > 0 || always_up;
+				/* see comments in timestamptz_trunc */
+				if (tm->tm_year > 0)
+				{
+					if (up || (tm->tm_year % 10) != 0)
+						tm->tm_year += 10;
+
+					tm->tm_year = (tm->tm_year / 10) * 10;
+				}
+				else
+				{
+					if (up || (tm->tm_year % 10) != 0)
+						tm->tm_year += 10;
+
+					tm->tm_year = -((8 - (tm->tm_year - 1)) / 10) * 10;
+				}
+
+				tm->tm_mon = 1;
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+			}
+			case DTK_YEAR:
+				if (tm->tm_mon > 1 || tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 ||
+					fsec > 0 || always_up)
+					tm->tm_year++;
+
+				tm->tm_mon = 1;
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_QUARTER:
+				if ((tm->tm_mon % 3) != 1 || tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 ||
+						fsec > 0 || always_up)
+					tm->tm_mon += 3;
+
+				tm->tm_mon = (3 * ((tm->tm_mon - 1) / 3)) + 1;
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_MONTH:
+				if (tm->tm_mday > 1 || tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 || fsec > 0 || always_up)
+					tm->tm_mon++;
+
+				tm->tm_mday = 1;
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_DAY:
+				if (tm->tm_hour > 0 || tm->tm_min > 0 || tm->tm_sec > 0 || fsec > 0 || always_up)
+					tm->tm_mday++;
+
+				tm->tm_hour = 0;
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_HOUR:
+				if (tm->tm_min > 0 || tm->tm_sec > 0 || fsec > 0 || always_up)
+					tm->tm_hour++;
+
+				tm->tm_min = 0;
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_MINUTE:
+				if (tm->tm_sec > 0 || fsec > 0 || always_up)
+					tm->tm_min++;
+
+				tm->tm_sec = 0;
+				fsec = 0;
+				break;
+
+			case DTK_SECOND:
+				if (fsec > 0 || always_up)
+					tm->tm_sec++;
+
+				fsec = 0;
+				break;
+
+			case DTK_MILLISEC:
+				if (always_up)
+					fsec = ((fsec / 1000) + 1) * 1000;
+				else
+					fsec = fsec + fsec % 1000;
+				break;
+
+			case DTK_MICROSEC:
+				break;
+
+			default:
+				ereport(ERROR,
+						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+								errmsg("timestamp units \"%s\" not supported",
+									   lowunits)));
+				result = 0;
+		}
+
+		if (tm->tm_sec == 60)
+		{
+			tm->tm_sec = 0;
+			tm->tm_min++;
+		}
+
+		if (tm->tm_min == 60)
+		{
+			tm->tm_min = 0;
+			tm->tm_hour++;
+		}
+
+		if (tm->tm_hour == HOURS_PER_DAY)
+		{
+			tm->tm_hour = 0;
+			tm->tm_mday++;
+		}
+
+		if (tm->tm_mday > day_tab[isleap(tm->tm_year)][tm->tm_mon - 1])
+		{
+			tm->tm_mday = 1;
+			tm->tm_mon++;
+		}
+
+		if (tm->tm_mon > MONTHS_PER_YEAR)
+		{
+			tm->tm_mon = 1;
+			tm->tm_year++;
+		}
+
+		if (tm2timestamp(tm, fsec, NULL, &result) != 0)
+			ereport(ERROR,
+					(errcode(ERRCODE_DATETIME_VALUE_OUT_OF_RANGE),
+							errmsg("timestamp out of range")));
+	}
+	else
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+						errmsg("timestamp units \"%s\" not recognized",
+							   lowunits)));
+		result = 0;
+	}
+
+	PG_RETURN_TIMESTAMP(result);
+}
 
 /* timestamp_trunc()
  * Truncate timestamp to specified units.

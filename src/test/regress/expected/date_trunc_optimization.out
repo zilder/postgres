@@ -1,0 +1,779 @@
+--
+-- Tests for date_trunc optimization in the planner over timestamp fields.
+--
+CREATE TABLE TIMESTAMP_OPTIM_TBL (d1 TIMESTAMP(2) without time zone);
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1957-04-09');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1957-06-13');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1990-01-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1990-05-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1991-01-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1996-02-28');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1996-02-29');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1996-03-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1996-03-02');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1997-02-28');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1997-03-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('1997-03-02');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2000-01-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2000-04-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2000-04-02');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2000-04-03');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2001-01-01');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2038-04-08');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2039-04-09');
+INSERT INTO TIMESTAMP_OPTIM_TBL VALUES ('2040-04-10');
+-- date_trunc greater than operation optimization
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_gt from TIMESTAMP_OPTIM_TBL
+  WHERE DATE_TRUNC('DECADE', d1) > TIMESTAMP '1992-01-01';
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: (d1 >= 'Sat Jan 01 00:00:00 2000'::timestamp without time zone)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_gt from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1992-01-01' < DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_gt    
+--------------------------
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(8 rows)
+
+SELECT d1 AS date_trunc_optim_gt from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) > TIMESTAMP '1992-01-01';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_gt    
+--------------------------
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(8 rows)
+
+-- date_trunc greater than or equal operation optimization
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL
+  WHERE DATE_TRUNC('DECADE', d1) >= TIMESTAMP '1993-12-25';
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: (d1 >= 'Sat Jan 01 00:00:00 2000'::timestamp without time zone)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1993-12-25' <= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_ge    
+--------------------------
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(8 rows)
+
+SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) >= TIMESTAMP '1993-12-25';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_ge    
+--------------------------
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(8 rows)
+
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL
+  WHERE TIMESTAMP '1990-01-01' <= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                 
+---------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: ('Mon Jan 01 00:00:00 1990'::timestamp without time zone <= d1)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1990-01-01' <= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_ge    
+--------------------------
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(18 rows)
+
+SELECT d1 AS date_trunc_optim_ge from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) >= TIMESTAMP '1990-01-01';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_ge    
+--------------------------
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+ Sat Jan 01 00:00:00 2000
+ Sat Apr 01 00:00:00 2000
+ Sun Apr 02 00:00:00 2000
+ Mon Apr 03 00:00:00 2000
+ Mon Jan 01 00:00:00 2001
+ Thu Apr 08 00:00:00 2038
+ Sat Apr 09 00:00:00 2039
+ Tue Apr 10 00:00:00 2040
+(18 rows)
+
+-- date_trunc less than operation optimization
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_lt from TIMESTAMP_OPTIM_TBL
+  WHERE TIMESTAMP '1991-01-01' > DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: ('Sat Jan 01 00:00:00 2000'::timestamp without time zone > d1)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_lt from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1991-01-01' > DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_lt    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+SELECT d1 AS date_trunc_optim_lt from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) < TIMESTAMP '1991-01-01';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_lt    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+-- date_trunc greater than or equal operation optimization
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL
+  WHERE TIMESTAMP '1993-01-01' >= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: ('Sat Jan 01 00:00:00 2000'::timestamp without time zone > d1)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1993-01-01' >= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_le    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) <= TIMESTAMP '1993-01-01';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_le    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+-- timestamp comparison
+EXPLAIN SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL
+  WHERE TIMESTAMP '1990-01-01' >= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+                                QUERY PLAN                                
+--------------------------------------------------------------------------
+ Seq Scan on timestamp_optim_tbl  (cost=0.00..38.25 rows=753 width=8)
+   Filter: ('Sat Jan 01 00:00:00 2000'::timestamp without time zone > d1)
+(2 rows)
+
+SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL WHERE TIMESTAMP '1990-01-01' >= DATE_TRUNC('DECADE', d1);
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_le    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+SELECT d1 AS date_trunc_optim_le from TIMESTAMP_OPTIM_TBL WHERE DATE_TRUNC('DECADE', d1) <= TIMESTAMP '1990-01-01';
+NOTICE:  Applying date_trunc optimization...
+   date_trunc_optim_le    
+--------------------------
+ Tue Apr 09 00:00:00 1957
+ Thu Jun 13 00:00:00 1957
+ Mon Jan 01 00:00:00 1990
+ Tue May 01 00:00:00 1990
+ Tue Jan 01 00:00:00 1991
+ Wed Feb 28 00:00:00 1996
+ Thu Feb 29 00:00:00 1996
+ Fri Mar 01 00:00:00 1996
+ Sat Mar 02 00:00:00 1996
+ Fri Feb 28 00:00:00 1997
+ Sat Mar 01 00:00:00 1997
+ Sun Mar 02 00:00:00 1997
+(12 rows)
+
+CREATE TABLE TIMESTAMP2_TBL (d2 TIMESTAMP(2) without time zone);
+-- Special values
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 15 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 26 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 27 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 28 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 0097 BC');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 1797');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 1897');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 16 17:32:01 2097');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 28 17:32:01 1996');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Mar 01 17:32:01 1996');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 30 17:32:01 1996');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 31 17:32:01 1996');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Jan 01 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Feb 28 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Mar 01 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 30 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 31 17:32:01 1997');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 31 17:32:01 1999');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Jan 01 17:32:01 2000');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Dec 31 17:32:01 2000');
+INSERT INTO TIMESTAMP2_TBL VALUES ('Jan 01 17:32:01 2001');
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) >= timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Tue Dec 30 17:32:01 1997
+ Wed Dec 31 17:32:01 1997
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(7 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) >= timestamp '1997-02-23 00:00:00.00000';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Wed Feb 26 17:32:01 1997
+ Thu Feb 27 17:32:01 1997
+ Fri Feb 28 17:32:01 1997
+ Sat Feb 16 17:32:01 2097
+ Fri Feb 28 17:32:01 1997
+ Sat Mar 01 17:32:01 1997
+ Tue Dec 30 17:32:01 1997
+ Wed Dec 31 17:32:01 1997
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(12 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) < timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+    timestamp_trunc_optim    
+-----------------------------
+ Sat Feb 15 17:32:01 1997
+ Sun Feb 16 17:32:01 1997
+ Wed Feb 26 17:32:01 1997
+ Thu Feb 27 17:32:01 1997
+ Fri Feb 28 17:32:01 1997
+ Tue Feb 16 17:32:01 0097 BC
+ Thu Feb 16 17:32:01 1797
+ Tue Feb 16 17:32:01 1897
+ Sun Feb 16 17:32:01 1997
+ Wed Feb 28 17:32:01 1996
+ Fri Mar 01 17:32:01 1996
+ Mon Dec 30 17:32:01 1996
+ Tue Dec 31 17:32:01 1996
+ Wed Jan 01 17:32:01 1997
+ Fri Feb 28 17:32:01 1997
+ Sat Mar 01 17:32:01 1997
+(16 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) <= timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+    timestamp_trunc_optim    
+-----------------------------
+ Sat Feb 15 17:32:01 1997
+ Sun Feb 16 17:32:01 1997
+ Wed Feb 26 17:32:01 1997
+ Thu Feb 27 17:32:01 1997
+ Fri Feb 28 17:32:01 1997
+ Tue Feb 16 17:32:01 0097 BC
+ Thu Feb 16 17:32:01 1797
+ Tue Feb 16 17:32:01 1897
+ Sun Feb 16 17:32:01 1997
+ Wed Feb 28 17:32:01 1996
+ Fri Mar 01 17:32:01 1996
+ Mon Dec 30 17:32:01 1996
+ Tue Dec 31 17:32:01 1996
+ Wed Jan 01 17:32:01 1997
+ Fri Feb 28 17:32:01 1997
+ Sat Mar 01 17:32:01 1997
+(16 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) <= timestamp '1997-02-23 00:00:00.00000';
+NOTICE:  Applying date_trunc optimization...
+    timestamp_trunc_optim    
+-----------------------------
+ Sat Feb 15 17:32:01 1997
+ Sun Feb 16 17:32:01 1997
+ Tue Feb 16 17:32:01 0097 BC
+ Thu Feb 16 17:32:01 1797
+ Tue Feb 16 17:32:01 1897
+ Sun Feb 16 17:32:01 1997
+ Wed Feb 28 17:32:01 1996
+ Fri Mar 01 17:32:01 1996
+ Mon Dec 30 17:32:01 1996
+ Tue Dec 31 17:32:01 1996
+ Wed Jan 01 17:32:01 1997
+(11 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('DAY', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Sat Mar 01 17:32:01 1997
+ Tue Dec 30 17:32:01 1997
+ Wed Dec 31 17:32:01 1997
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(8 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('WEEK', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Tue Dec 30 17:32:01 1997
+ Wed Dec 31 17:32:01 1997
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(7 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('MONTH', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Sat Mar 01 17:32:01 1997
+ Tue Dec 30 17:32:01 1997
+ Wed Dec 31 17:32:01 1997
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(8 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('YEAR', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Fri Dec 31 17:32:01 1999
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(5 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('DECADE', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Sat Jan 01 17:32:01 2000
+ Sun Dec 31 17:32:01 2000
+ Mon Jan 01 17:32:01 2001
+(4 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('CENTURY', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Mon Jan 01 17:32:01 2001
+(2 rows)
+
+SELECT d2 AS timestamp_trunc_optim from TIMESTAMP2_TBL
+  WHERE DATE_TRUNC('MILLENNIUM', d2) > timestamp '1997-02-28 15:44:17.71393';
+NOTICE:  Applying date_trunc optimization...
+  timestamp_trunc_optim   
+--------------------------
+ Sat Feb 16 17:32:01 2097
+ Mon Jan 01 17:32:01 2001
+(2 rows)
+
+CREATE INDEX idx on TIMESTAMP2_TBL (d2);
+--
+-- Tests for date_trunc optimization for joins.
+--
+EXPLAIN SELECT d1, d2 from TIMESTAMP_OPTIM_TBL tso join TIMESTAMP2_TBL ts on tso.d1 > DATE_TRUNC('week', ts.d2);
+NOTICE:  Applying date_trunc optimization...
+                                       QUERY PLAN                                       
+----------------------------------------------------------------------------------------
+ Nested Loop  (cost=0.14..858.20 rows=17327 width=16)
+   ->  Seq Scan on timestamp_optim_tbl tso  (cost=0.00..32.60 rows=2260 width=8)
+   ->  Index Only Scan using idx on timestamp2_tbl ts  (cost=0.14..0.29 rows=8 width=8)
+         Index Cond: (d2 < date_trunc_up('week'::text, tso.d1, false))
+(4 rows)
+
+SELECT d1, d2 from TIMESTAMP_OPTIM_TBL tso join TIMESTAMP2_TBL ts on tso.d1 > DATE_TRUNC('week', ts.d2);
+NOTICE:  Applying date_trunc optimization...
+            d1            |             d2              
+--------------------------+-----------------------------
+ Tue Apr 09 00:00:00 1957 | Tue Feb 16 17:32:01 0097 BC
+ Tue Apr 09 00:00:00 1957 | Thu Feb 16 17:32:01 1797
+ Tue Apr 09 00:00:00 1957 | Tue Feb 16 17:32:01 1897
+ Thu Jun 13 00:00:00 1957 | Tue Feb 16 17:32:01 0097 BC
+ Thu Jun 13 00:00:00 1957 | Thu Feb 16 17:32:01 1797
+ Thu Jun 13 00:00:00 1957 | Tue Feb 16 17:32:01 1897
+ Mon Jan 01 00:00:00 1990 | Tue Feb 16 17:32:01 0097 BC
+ Mon Jan 01 00:00:00 1990 | Thu Feb 16 17:32:01 1797
+ Mon Jan 01 00:00:00 1990 | Tue Feb 16 17:32:01 1897
+ Tue May 01 00:00:00 1990 | Tue Feb 16 17:32:01 0097 BC
+ Tue May 01 00:00:00 1990 | Thu Feb 16 17:32:01 1797
+ Tue May 01 00:00:00 1990 | Tue Feb 16 17:32:01 1897
+ Tue Jan 01 00:00:00 1991 | Tue Feb 16 17:32:01 0097 BC
+ Tue Jan 01 00:00:00 1991 | Thu Feb 16 17:32:01 1797
+ Tue Jan 01 00:00:00 1991 | Tue Feb 16 17:32:01 1897
+ Wed Feb 28 00:00:00 1996 | Tue Feb 16 17:32:01 0097 BC
+ Wed Feb 28 00:00:00 1996 | Thu Feb 16 17:32:01 1797
+ Wed Feb 28 00:00:00 1996 | Tue Feb 16 17:32:01 1897
+ Wed Feb 28 00:00:00 1996 | Wed Feb 28 17:32:01 1996
+ Wed Feb 28 00:00:00 1996 | Fri Mar 01 17:32:01 1996
+ Thu Feb 29 00:00:00 1996 | Tue Feb 16 17:32:01 0097 BC
+ Thu Feb 29 00:00:00 1996 | Thu Feb 16 17:32:01 1797
+ Thu Feb 29 00:00:00 1996 | Tue Feb 16 17:32:01 1897
+ Thu Feb 29 00:00:00 1996 | Wed Feb 28 17:32:01 1996
+ Thu Feb 29 00:00:00 1996 | Fri Mar 01 17:32:01 1996
+ Fri Mar 01 00:00:00 1996 | Tue Feb 16 17:32:01 0097 BC
+ Fri Mar 01 00:00:00 1996 | Thu Feb 16 17:32:01 1797
+ Fri Mar 01 00:00:00 1996 | Tue Feb 16 17:32:01 1897
+ Fri Mar 01 00:00:00 1996 | Wed Feb 28 17:32:01 1996
+ Fri Mar 01 00:00:00 1996 | Fri Mar 01 17:32:01 1996
+ Sat Mar 02 00:00:00 1996 | Tue Feb 16 17:32:01 0097 BC
+ Sat Mar 02 00:00:00 1996 | Thu Feb 16 17:32:01 1797
+ Sat Mar 02 00:00:00 1996 | Tue Feb 16 17:32:01 1897
+ Sat Mar 02 00:00:00 1996 | Wed Feb 28 17:32:01 1996
+ Sat Mar 02 00:00:00 1996 | Fri Mar 01 17:32:01 1996
+ Fri Feb 28 00:00:00 1997 | Tue Feb 16 17:32:01 0097 BC
+ Fri Feb 28 00:00:00 1997 | Thu Feb 16 17:32:01 1797
+ Fri Feb 28 00:00:00 1997 | Tue Feb 16 17:32:01 1897
+ Fri Feb 28 00:00:00 1997 | Wed Feb 28 17:32:01 1996
+ Fri Feb 28 00:00:00 1997 | Fri Mar 01 17:32:01 1996
+ Fri Feb 28 00:00:00 1997 | Mon Dec 30 17:32:01 1996
+ Fri Feb 28 00:00:00 1997 | Tue Dec 31 17:32:01 1996
+ Fri Feb 28 00:00:00 1997 | Wed Jan 01 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Sat Feb 15 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Wed Feb 26 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Thu Feb 27 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Fri Feb 28 00:00:00 1997 | Sat Mar 01 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Tue Feb 16 17:32:01 0097 BC
+ Sat Mar 01 00:00:00 1997 | Thu Feb 16 17:32:01 1797
+ Sat Mar 01 00:00:00 1997 | Tue Feb 16 17:32:01 1897
+ Sat Mar 01 00:00:00 1997 | Wed Feb 28 17:32:01 1996
+ Sat Mar 01 00:00:00 1997 | Fri Mar 01 17:32:01 1996
+ Sat Mar 01 00:00:00 1997 | Mon Dec 30 17:32:01 1996
+ Sat Mar 01 00:00:00 1997 | Tue Dec 31 17:32:01 1996
+ Sat Mar 01 00:00:00 1997 | Wed Jan 01 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Sat Feb 15 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Wed Feb 26 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Thu Feb 27 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Sat Mar 01 00:00:00 1997 | Sat Mar 01 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Tue Feb 16 17:32:01 0097 BC
+ Sun Mar 02 00:00:00 1997 | Thu Feb 16 17:32:01 1797
+ Sun Mar 02 00:00:00 1997 | Tue Feb 16 17:32:01 1897
+ Sun Mar 02 00:00:00 1997 | Wed Feb 28 17:32:01 1996
+ Sun Mar 02 00:00:00 1997 | Fri Mar 01 17:32:01 1996
+ Sun Mar 02 00:00:00 1997 | Mon Dec 30 17:32:01 1996
+ Sun Mar 02 00:00:00 1997 | Tue Dec 31 17:32:01 1996
+ Sun Mar 02 00:00:00 1997 | Wed Jan 01 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Sat Feb 15 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Sun Feb 16 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Wed Feb 26 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Thu Feb 27 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Fri Feb 28 17:32:01 1997
+ Sun Mar 02 00:00:00 1997 | Sat Mar 01 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Tue Feb 16 17:32:01 0097 BC
+ Sat Jan 01 00:00:00 2000 | Thu Feb 16 17:32:01 1797
+ Sat Jan 01 00:00:00 2000 | Tue Feb 16 17:32:01 1897
+ Sat Jan 01 00:00:00 2000 | Wed Feb 28 17:32:01 1996
+ Sat Jan 01 00:00:00 2000 | Fri Mar 01 17:32:01 1996
+ Sat Jan 01 00:00:00 2000 | Mon Dec 30 17:32:01 1996
+ Sat Jan 01 00:00:00 2000 | Tue Dec 31 17:32:01 1996
+ Sat Jan 01 00:00:00 2000 | Wed Jan 01 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Sat Feb 15 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Wed Feb 26 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Thu Feb 27 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Sat Mar 01 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Tue Dec 30 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Wed Dec 31 17:32:01 1997
+ Sat Jan 01 00:00:00 2000 | Fri Dec 31 17:32:01 1999
+ Sat Jan 01 00:00:00 2000 | Sat Jan 01 17:32:01 2000
+ Sat Apr 01 00:00:00 2000 | Tue Feb 16 17:32:01 0097 BC
+ Sat Apr 01 00:00:00 2000 | Thu Feb 16 17:32:01 1797
+ Sat Apr 01 00:00:00 2000 | Tue Feb 16 17:32:01 1897
+ Sat Apr 01 00:00:00 2000 | Wed Feb 28 17:32:01 1996
+ Sat Apr 01 00:00:00 2000 | Fri Mar 01 17:32:01 1996
+ Sat Apr 01 00:00:00 2000 | Mon Dec 30 17:32:01 1996
+ Sat Apr 01 00:00:00 2000 | Tue Dec 31 17:32:01 1996
+ Sat Apr 01 00:00:00 2000 | Wed Jan 01 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Sat Feb 15 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Wed Feb 26 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Thu Feb 27 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Sat Mar 01 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Tue Dec 30 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Wed Dec 31 17:32:01 1997
+ Sat Apr 01 00:00:00 2000 | Fri Dec 31 17:32:01 1999
+ Sat Apr 01 00:00:00 2000 | Sat Jan 01 17:32:01 2000
+ Sun Apr 02 00:00:00 2000 | Tue Feb 16 17:32:01 0097 BC
+ Sun Apr 02 00:00:00 2000 | Thu Feb 16 17:32:01 1797
+ Sun Apr 02 00:00:00 2000 | Tue Feb 16 17:32:01 1897
+ Sun Apr 02 00:00:00 2000 | Wed Feb 28 17:32:01 1996
+ Sun Apr 02 00:00:00 2000 | Fri Mar 01 17:32:01 1996
+ Sun Apr 02 00:00:00 2000 | Mon Dec 30 17:32:01 1996
+ Sun Apr 02 00:00:00 2000 | Tue Dec 31 17:32:01 1996
+ Sun Apr 02 00:00:00 2000 | Wed Jan 01 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Sat Feb 15 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Wed Feb 26 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Thu Feb 27 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Sat Mar 01 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Tue Dec 30 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Wed Dec 31 17:32:01 1997
+ Sun Apr 02 00:00:00 2000 | Fri Dec 31 17:32:01 1999
+ Sun Apr 02 00:00:00 2000 | Sat Jan 01 17:32:01 2000
+ Mon Apr 03 00:00:00 2000 | Tue Feb 16 17:32:01 0097 BC
+ Mon Apr 03 00:00:00 2000 | Thu Feb 16 17:32:01 1797
+ Mon Apr 03 00:00:00 2000 | Tue Feb 16 17:32:01 1897
+ Mon Apr 03 00:00:00 2000 | Wed Feb 28 17:32:01 1996
+ Mon Apr 03 00:00:00 2000 | Fri Mar 01 17:32:01 1996
+ Mon Apr 03 00:00:00 2000 | Mon Dec 30 17:32:01 1996
+ Mon Apr 03 00:00:00 2000 | Tue Dec 31 17:32:01 1996
+ Mon Apr 03 00:00:00 2000 | Wed Jan 01 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Sat Feb 15 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Sun Feb 16 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Wed Feb 26 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Thu Feb 27 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Fri Feb 28 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Sat Mar 01 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Tue Dec 30 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Wed Dec 31 17:32:01 1997
+ Mon Apr 03 00:00:00 2000 | Fri Dec 31 17:32:01 1999
+ Mon Apr 03 00:00:00 2000 | Sat Jan 01 17:32:01 2000
+ Mon Jan 01 00:00:00 2001 | Tue Feb 16 17:32:01 0097 BC
+ Mon Jan 01 00:00:00 2001 | Thu Feb 16 17:32:01 1797
+ Mon Jan 01 00:00:00 2001 | Tue Feb 16 17:32:01 1897
+ Mon Jan 01 00:00:00 2001 | Wed Feb 28 17:32:01 1996
+ Mon Jan 01 00:00:00 2001 | Fri Mar 01 17:32:01 1996
+ Mon Jan 01 00:00:00 2001 | Mon Dec 30 17:32:01 1996
+ Mon Jan 01 00:00:00 2001 | Tue Dec 31 17:32:01 1996
+ Mon Jan 01 00:00:00 2001 | Wed Jan 01 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Sat Feb 15 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Sun Feb 16 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Sun Feb 16 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Wed Feb 26 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Thu Feb 27 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Fri Feb 28 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Fri Feb 28 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Sat Mar 01 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Tue Dec 30 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Wed Dec 31 17:32:01 1997
+ Mon Jan 01 00:00:00 2001 | Fri Dec 31 17:32:01 1999
+ Mon Jan 01 00:00:00 2001 | Sat Jan 01 17:32:01 2000
+ Mon Jan 01 00:00:00 2001 | Sun Dec 31 17:32:01 2000
+ Thu Apr 08 00:00:00 2038 | Tue Feb 16 17:32:01 0097 BC
+ Thu Apr 08 00:00:00 2038 | Thu Feb 16 17:32:01 1797
+ Thu Apr 08 00:00:00 2038 | Tue Feb 16 17:32:01 1897
+ Thu Apr 08 00:00:00 2038 | Wed Feb 28 17:32:01 1996
+ Thu Apr 08 00:00:00 2038 | Fri Mar 01 17:32:01 1996
+ Thu Apr 08 00:00:00 2038 | Mon Dec 30 17:32:01 1996
+ Thu Apr 08 00:00:00 2038 | Tue Dec 31 17:32:01 1996
+ Thu Apr 08 00:00:00 2038 | Wed Jan 01 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Sat Feb 15 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Sun Feb 16 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Sun Feb 16 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Wed Feb 26 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Thu Feb 27 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Fri Feb 28 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Fri Feb 28 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Sat Mar 01 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Tue Dec 30 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Wed Dec 31 17:32:01 1997
+ Thu Apr 08 00:00:00 2038 | Fri Dec 31 17:32:01 1999
+ Thu Apr 08 00:00:00 2038 | Sat Jan 01 17:32:01 2000
+ Thu Apr 08 00:00:00 2038 | Sun Dec 31 17:32:01 2000
+ Thu Apr 08 00:00:00 2038 | Mon Jan 01 17:32:01 2001
+ Sat Apr 09 00:00:00 2039 | Tue Feb 16 17:32:01 0097 BC
+ Sat Apr 09 00:00:00 2039 | Thu Feb 16 17:32:01 1797
+ Sat Apr 09 00:00:00 2039 | Tue Feb 16 17:32:01 1897
+ Sat Apr 09 00:00:00 2039 | Wed Feb 28 17:32:01 1996
+ Sat Apr 09 00:00:00 2039 | Fri Mar 01 17:32:01 1996
+ Sat Apr 09 00:00:00 2039 | Mon Dec 30 17:32:01 1996
+ Sat Apr 09 00:00:00 2039 | Tue Dec 31 17:32:01 1996
+ Sat Apr 09 00:00:00 2039 | Wed Jan 01 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Sat Feb 15 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Sun Feb 16 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Sun Feb 16 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Wed Feb 26 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Thu Feb 27 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Fri Feb 28 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Fri Feb 28 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Sat Mar 01 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Tue Dec 30 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Wed Dec 31 17:32:01 1997
+ Sat Apr 09 00:00:00 2039 | Fri Dec 31 17:32:01 1999
+ Sat Apr 09 00:00:00 2039 | Sat Jan 01 17:32:01 2000
+ Sat Apr 09 00:00:00 2039 | Sun Dec 31 17:32:01 2000
+ Sat Apr 09 00:00:00 2039 | Mon Jan 01 17:32:01 2001
+ Tue Apr 10 00:00:00 2040 | Tue Feb 16 17:32:01 0097 BC
+ Tue Apr 10 00:00:00 2040 | Thu Feb 16 17:32:01 1797
+ Tue Apr 10 00:00:00 2040 | Tue Feb 16 17:32:01 1897
+ Tue Apr 10 00:00:00 2040 | Wed Feb 28 17:32:01 1996
+ Tue Apr 10 00:00:00 2040 | Fri Mar 01 17:32:01 1996
+ Tue Apr 10 00:00:00 2040 | Mon Dec 30 17:32:01 1996
+ Tue Apr 10 00:00:00 2040 | Tue Dec 31 17:32:01 1996
+ Tue Apr 10 00:00:00 2040 | Wed Jan 01 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Sat Feb 15 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Sun Feb 16 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Sun Feb 16 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Wed Feb 26 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Thu Feb 27 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Fri Feb 28 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Fri Feb 28 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Sat Mar 01 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Tue Dec 30 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Wed Dec 31 17:32:01 1997
+ Tue Apr 10 00:00:00 2040 | Fri Dec 31 17:32:01 1999
+ Tue Apr 10 00:00:00 2040 | Sat Jan 01 17:32:01 2000
+ Tue Apr 10 00:00:00 2040 | Sun Dec 31 17:32:01 2000
+ Tue Apr 10 00:00:00 2040 | Mon Jan 01 17:32:01 2001
+(250 rows)
+
+DROP TABLE TIMESTAMP_OPTIM_TBL;
+DROP TABLE TIMESTAMP2_TBL;

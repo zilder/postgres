@@ -99,3 +99,22 @@ extern ObjectAddress makeOperatorDependencies(HeapTuple tuple, bool isUpdate);
 extern void OperatorUpd(Oid baseId, Oid commId, Oid negId, bool isDelete);
 
 #endif							/* PG_OPERATOR_H */
+// <<<<<<<
+// =======
+// DESCR("not equal");
+// DATA(insert OID = 2062 (  "<"	   PGNSP PGUID b f f 1114 1114	 16 2064 2065 timestamp_lt scalarltsel scalarltjoinsel ));
+// DESCR("less than");
+// #define OID_TS_LE_TS_OP 2062
+// DATA(insert OID = 2063 (  "<="	   PGNSP PGUID b f f 1114 1114	 16 2065 2064 timestamp_le scalarlesel scalarlejoinsel ));
+// DESCR("less than or equal");
+// #define OID_TS_LEE_TS_OP 2063
+// DATA(insert OID = 2064 (  ">"	   PGNSP PGUID b f f 1114 1114	 16 2062 2063 timestamp_gt scalargtsel scalargtjoinsel ));
+// DESCR("greater than");
+// #define OID_TS_GR_TS_OP 2064
+// DATA(insert OID = 2065 (  ">="	   PGNSP PGUID b f f 1114 1114	 16 2063 2062 timestamp_ge scalargesel scalargejoinsel ));
+// DESCR("greater than or equal");
+// #define OID_TS_GRE_TS_OP 2065
+// DATA(insert OID = 2066 (  "+"	   PGNSP PGUID b f f 1114 1186 1114  2553 0 timestamp_pl_interval - - ));
+// DESCR("add");
+// DATA(insert OID = 2067 (  "-"	   PGNSP PGUID b f f 1114 1114 1186  0	0 timestamp_mi - - ));
+// >>>>>>>
