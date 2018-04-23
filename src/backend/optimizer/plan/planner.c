@@ -1020,6 +1020,69 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 						(Datum) (mins), (Datum) secs) \
 )
 
+// static bool
+// unit_to_interval(Node *units, Interval **interval)
+// {
+// 	/* Expect const */
+// 	/* TODO: eval_const_expr */
+// 	if (!IsA(units_arg, Const))
+// 		return false;
+
+// 	units = ((Const *) units_arg)->constvalue;
+// 	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
+// 											VARSIZE_ANY_EXHDR(units),
+// 											false);
+// 	type = DecodeUnits(0, lowunits, &val);
+
+// 	if (type == UNITS)
+// 	{
+// 		switch (val)
+// 		{
+// 			case DTK_YEAR:
+// 				interval = MAKE_INTERVAL(1, NULL, NULL, NULL, NULL, NULL, NULL);
+// 				break;
+// 			case DTK_QUARTER:
+// 				interval = MAKE_INTERVAL(NULL, 3, NULL, NULL, NULL, NULL, NULL);
+// 				break;
+// 			case DTK_MONTH:
+// 				interval = MAKE_INTERVAL(NULL, 1, NULL, NULL, NULL, NULL, NULL);
+// 				break;
+// 			case DTK_WEEK:
+// 				interval = MAKE_INTERVAL(NULL, NULL, 1, NULL, NULL, NULL, NULL);
+// 				break;
+// 			case DTK_DAY:
+// 				interval = MAKE_INTERVAL(NULL, NULL, NULL, 1, NULL, NULL, NULL);
+// 				break;
+// 			case DTK_HOUR:
+// 				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, 1, NULL, NULL);
+// 				break;
+// 			case DTK_MINUTE:
+// 				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, 1, NULL);
+// 				break;
+// 			case DTK_SECOND:
+// 				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, NULL, 1);
+// 				break;
+// 			default:
+// 				elog(ERROR, "not supported");
+// 		}
+// 	}
+// 	else
+// 	{
+// 		ereport(ERROR,
+// 				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+// 				 errmsg("timestamp units \"%s\" not recognized",
+// 						lowunits)));
+// 	}
+
+// 	return true;
+// }
+
+static bool
+optimize_date_trunc(Node *ts, Node *unit, int strategy)
+{
+
+}
+
 /*
  * rewrite_date_trunc_comparisons
  *		Rewrite date_trunc functional expression comparison with timestamp
@@ -1035,25 +1098,25 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 	List	   *args;
 	FuncExpr   *trunc_func = NULL;
 	// bool		dtsecond = false;
-	Node	   *first_arg;
-	Node	   *second_arg;
+	Node	   *left_op;
+	Node	   *right_op;
 	Node	   *threshold_arg = NULL;
 	List	   *func_args = NIL;
 	Node	   *units_arg;
-	Datum		units;
-	// Node	   *truncated_arg;
-	// bool		always_up;
-	// FuncExpr   *new_func;
+	// Datum		units;
+	Node	   *truncated_arg;
+	bool		always_up;
+	FuncExpr   *new_func;
 	// Node	   *new_first_arg;
 	// Node	   *new_second_arg;
 	// Oid			new_op;
 	// Oid			new_funcid = F_TIMESTAMP_TRUNC_UP;
 	// OpExpr	   *new_expr;
 	int			strategy;
-	char	   *lowunits;
-	int			type,
-				val;
-	Datum		interval;
+	// char	   *lowunits;
+	// int			type,
+	// 			val;
+	// Datum		interval;
 	TypeCacheEntry *tce;
 
 	if (node == NULL)
@@ -1079,8 +1142,8 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 	/*
 	 * Find position of date_trunc functional expression argument.
 	 */
-	first_arg = (Node *) linitial(args);
-	second_arg = (Node *) lsecond(args);
+	left_op = (Node *) linitial(args);
+	right_op = (Node *) lsecond(args);
 
 	// if (IsA(first_arg, FuncExpr)) {
 	// 	FuncExpr *ffirst = (FuncExpr *) first_arg;
@@ -1105,26 +1168,26 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 	 * Expect format func_trunc(unit, var) op const  or
 	 * const op func_trunc(unit, var)
 	 */
-	if (IsA(first_arg, FuncExpr))
+	if (IsA(left_op, FuncExpr))
 	{
-		trunc_func = (FuncExpr *) first_arg;
+		trunc_func = (FuncExpr *) left_op;
 
 		if (trunc_func->funcid == F_TIMESTAMP_TRUNC)
-			threshold_arg = second_arg;
+			threshold_arg = right_op;
 	}
-	else if (IsA(second_arg, FuncExpr))
+	else if (IsA(right_op, FuncExpr))
 	{
-		trunc_func = (FuncExpr *) second_arg;
+		trunc_func = (FuncExpr *) right_op;
 
-		if (f->funcid == F_TIMESTAMP_TRUNC)
+		if (trunc_func->funcid == F_TIMESTAMP_TRUNC)
 		{
 			/*
 			 * Inverse comparison operator to transform expression to canonical
 			 * "func_trunc(unit, var) op const" format
 			 */
-			expr->args = list_make2(second_arg, first_arg);
+			expr->args = list_make2(right_op, left_op);
 			expr->opno = get_commutator(expr->opno);
-			threshold_arg = first_arg;
+			threshold_arg = left_op;
 		}
 	}
 	else
@@ -1165,121 +1228,81 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 	// 		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 	// }
 
-	/* If operator is not in opfamily */
+	/* If operator is not in opfamily or it's equal strategy */
 	if (strategy == InvalidStrategy || strategy == BTEqualStrategyNumber)
 		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 
-	units_arg = linitial(func_args);
+	if (strategy == BTLessEqualStrategyNumber || strategy == BTGreaterStrategyNumber)
+		always_up = true;
 
-	/* Expect const */
-	if (!IsA(units_arg, Const))
-		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+	// units_arg = linitial(func_args);
 
-	units = ((Const *) units_arg)->constvalue;
-	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
-											VARSIZE_ANY_EXHDR(units),
-											false);
-	type = DecodeUnits(0, lowunits, &val);
-
-	if (type == UNITS)
-	{
-		switch (val)
-		{
-			case DTK_YEAR:
-				interval = MAKE_INTERVAL(1, NULL, NULL, NULL, NULL, NULL, NULL);
-				break;
-			case DTK_QUARTER:
-				interval = MAKE_INTERVAL(NULL, 3, NULL, NULL, NULL, NULL, NULL);
-				break;
-			case DTK_MONTH:
-				interval = MAKE_INTERVAL(NULL, 1, NULL, NULL, NULL, NULL, NULL);
-				break;
-			case DTK_WEEK:
-				interval = MAKE_INTERVAL(NULL, NULL, 1, NULL, NULL, NULL, NULL);
-				break;
-			case DTK_DAY:
-				interval = MAKE_INTERVAL(NULL, NULL, NULL, 1, NULL, NULL, NULL);
-				break;
-			case DTK_HOUR:
-				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, 1, NULL, NULL);
-				break;
-			case DTK_MINUTE:
-				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, 1, NULL);
-				break;
-			case DTK_SECOND:
-				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, NULL, 1);
-				break;
-			default:
-				elog(ERROR, "not supported");
-		}
-	}
-	else
-	{
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
-				 errmsg("timestamp units \"%s\" not recognized",
-						lowunits)));
-		// result = 0;
-	}
-
+	// if (!unit_to_interval(units_arg, &interval))
+	// 	return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 	/*
 	 * Build the new date_trunc function call (now on the other side of the comparison).
 	 */
-	// units_arg = linitial(func_args);
-	// new_func = copyObject(func);
-	// new_func->funcid = new_funcid;
-	// new_func->args = list_make3(units_arg, threshold_arg, makeBoolConst(always_up, false));
-	// new_func->location = -1;
-	{
-		Oid plusop = OpernameGetOprid(list_make1(makeString("+")),
-									  exprType(threshold_arg), INTERVALOID);
-		Const *interval_const;
-		Expr *new_threshold;
-		Expr *internal_expr = lsecond(func_args);
-		int16 typlen;
-		bool typbyval;
-		int new_strategy;
+	units_arg = linitial(func_args);
+	new_func = copyObject(trunc_func);
+	new_func->funcid = F_TIMESTAMP_TRUNC_UP;
+	new_func->args = list_make3(units_arg, threshold_arg, makeBoolConst(always_up, false));
+	new_func->location = -1;
 
-		get_typlenbyval(INTERVALOID, &typlen, &typbyval);
+	// {
+	// 	Oid plusop = OpernameGetOprid(list_make1(makeString("+")),
+	// 								  exprType(threshold_arg), INTERVALOID);
+	// 	Const *interval_const;
+	// 	Expr *new_threshold;
+	// 	Expr *internal_expr = lsecond(func_args);
+	// 	int16 typlen;
+	// 	bool typbyval;
+	// 	int new_strategy;
 
-		interval_const = makeConst(INTERVALOID,
-		  		  -1,
-				  InvalidOid,
-		  		  typlen,
-				  interval,
-		  		  false,
-				  typbyval);
+	// 	get_typlenbyval(INTERVALOID, &typlen, &typbyval);
 
-		new_threshold = make_opclause(plusop, exprType(threshold_arg), false,
-									  (Expr *) threshold_arg, (Expr *) interval_const,
-									  InvalidOid, InvalidOid);
-		// new_threshold = (Expr *) threshold_arg;
+	// 	interval_const = makeConst(INTERVALOID,
+	// 	  		  -1,
+	// 			  InvalidOid,
+	// 	  		  typlen,
+	// 			  interval,
+	// 	  		  false,
+	// 			  typbyval);
 
-		trunc_func->args = list_make2(units_arg, new_threshold);
-		expr->args = list_make2(internal_expr, func);
-		new_strategy = strategy == BTLessStrategyNumber || strategy == BTLessEqualStrategyNumber ?
-			BTLessStrategyNumber : BTGreaterStrategyNumber;
-		expr->opno = get_opfamily_member(tce->btree_opf,
-										 exprType((Node *) internal_expr),
-										 exprType((Node *) func),
-										 new_strategy);
-		return (Node *) expr;	
-	}
-	// func->args()
+	// 	new_threshold = make_opclause(plusop, exprType(threshold_arg), false,
+	// 								  (Expr *) threshold_arg, (Expr *) interval_const,
+	// 								  InvalidOid, InvalidOid);
+	// 	// new_threshold = (Expr *) threshold_arg;
+
+	// 	trunc_func->args = list_make2(units_arg, new_threshold);
+	// 	expr->args = list_make2(internal_expr, func);
+	// 	new_strategy = strategy == BTLessStrategyNumber || strategy == BTLessEqualStrategyNumber ?
+	// 		BTLessStrategyNumber : BTGreaterStrategyNumber;
+	// 	expr->opno = get_opfamily_member(tce->btree_opf,
+	// 									 exprType((Node *) internal_expr),
+	// 									 exprType((Node *) func),
+	// 									 new_strategy);
+	// 	return (Node *) expr;	
+	// }
 
 	/*
 	 * Build the new comparison operator expression.
 	 */
-	// truncated_arg = lsecond(func_args);
-	// new_first_arg  = dtsecond ? (Node *) new_func : truncated_arg;
-	// new_second_arg = dtsecond ? truncated_arg : (Node *) new_func;
+	{
+		OpExpr *new_expr;
 
-	// new_expr = copyObject(expr);
-	// new_expr->opno = new_op;
-	// new_expr->opfuncid = InvalidOid;
-	// new_expr->args = list_make2(new_first_arg, new_second_arg);
-	// new_expr->location = -1;
-	// return (Node *) new_expr;
+		truncated_arg = lsecond(func_args);
+		// new_first_arg  = dtsecond ? (Node *) new_func : truncated_arg;
+		// new_second_arg = dtsecond ? truncated_arg : (Node *) new_func;
+
+		new_expr = copyObject(expr);
+		// new_expr->opno = new_op;
+		new_expr->opno = expr->opno;
+		new_expr->opfuncid = InvalidOid;
+		// new_expr->args = list_make2(new_first_arg, new_second_arg);
+		new_expr->args = list_make2(truncated_arg, new_func);
+		new_expr->location = -1;
+		return (Node *) new_expr;
+	}
 }
 
 /*
