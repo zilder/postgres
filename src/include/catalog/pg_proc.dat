@@ -2434,7 +2434,7 @@
 { oid => '10221',
   descr => 'truncate timestamp to specified units',
   proname => 'date_trunc_up', provolatile => 'i', prorettype => 'timestamp',
-  proargtypes => 'text timestamp', prosrc => 'timestamp_trunc_up' },
+  proargtypes => 'text timestamp bool', prosrc => 'timestamp_trunc_up' },
 
 { oid => '1219', descr => 'increment',
   proname => 'int8inc', prorettype => 'int8', proargtypes => 'int8',
