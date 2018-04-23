@@ -27,6 +27,7 @@
 #include "catalog/pg_operator.h"
 #include "catalog/pg_proc.h"
 #include "catalog/pg_type.h"
+#include "catalog/namespace.h"
 #include "executor/executor.h"
 #include "executor/nodeAgg.h"
 #include "foreign/fdwapi.h"
@@ -58,8 +59,10 @@
 #include "utils/fmgroids.h"
 #include "utils/rel.h"
 #include "utils/selfuncs.h"
+#include "utils/fmgrprotos.h"
 #include "utils/lsyscache.h"
 #include "utils/syscache.h"
+#include "utils/typcache.h"
 
 
 
@@ -999,15 +1002,23 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
  * Check if current operator should be always rounded up in date_trunc_up,
  * if first argument is date_trunc functional expression (applicable to: '<=', '>').
  */
-#define IsLeftTruncAlwaysUp(opno) \
-	((opno == OID_TS_LEE_TS_OP) || (opno == OID_TS_GR_TS_OP))
+/*// #define IsLeftTruncAlwaysUp(opno) \
+// 	((opno == OID_TS_LEE_TS_OP) || (opno == OID_TS_GR_TS_OP))*/
 
 /*
  * Check if provided operator should be optimized for date_trunc usage.
  * Applicable to '<=', '>=', '>', '<'.
  */
-#define IsTruncOptimizableComp(opno) (IsLeftTruncAlwaysUp(opno) || \
-	(opno == OID_TS_LE_TS_OP) || (opno == OID_TS_GRE_TS_OP))
+/*// #define IsTruncOptimizableComp(opno) (IsLeftTruncAlwaysUp(opno) || \
+// 	(opno == OID_TS_LE_TS_OP) || (opno == OID_TS_GRE_TS_OP))*/
+
+#define MAKE_INTERVAL(years, months, weeks, days, hours, mins, secs) \
+( \
+	DirectFunctionCall7(make_interval, (Datum) (months), \
+						(Datum) (years), (Datum) (weeks), \
+						(Datum) (days), (Datum) (hours), \
+						(Datum) (mins), (Datum) secs) \
+)
 
 /*
  * rewrite_date_trunc_comparisons
@@ -1019,26 +1030,31 @@ subquery_planner(PlannerGlobal *glob, Query *parse,
 static Node *
 rewrite_date_trunc_comparisons(Node *node, void *context)
 {
-	OpExpr	  *expr;
-	Oid		   opno;
-	List	  *args;
-	FuncExpr  *func = NULL;
-	bool	   dtsecond = false;
-	Node	  *first_arg;
-	Node	  *second_arg;
-	FuncExpr  *ffirst;
-	FuncExpr  *fsecond;
-	Node	  *threshold_arg = NULL;
-	List	  *func_args;
-	Node	  *units_arg;
-	Node	  *truncated_arg;
-	bool	   always_up;
-	FuncExpr  *new_func;
-	Node	  *new_first_arg;
-	Node	  *new_second_arg;
-	Oid		   new_op;
-	Oid 	   new_funcid = F_TIMESTAMP_TRUNC_UP;
-	OpExpr	  *new_expr;
+	OpExpr	   *expr;
+	// Oid			opno;
+	List	   *args;
+	FuncExpr   *trunc_func = NULL;
+	// bool		dtsecond = false;
+	Node	   *first_arg;
+	Node	   *second_arg;
+	Node	   *threshold_arg = NULL;
+	List	   *func_args = NIL;
+	Node	   *units_arg;
+	Datum		units;
+	// Node	   *truncated_arg;
+	// bool		always_up;
+	// FuncExpr   *new_func;
+	// Node	   *new_first_arg;
+	// Node	   *new_second_arg;
+	// Oid			new_op;
+	// Oid			new_funcid = F_TIMESTAMP_TRUNC_UP;
+	// OpExpr	   *new_expr;
+	int			strategy;
+	char	   *lowunits;
+	int			type,
+				val;
+	Datum		interval;
+	TypeCacheEntry *tce;
 
 	if (node == NULL)
 		return NULL;
@@ -1047,10 +1063,10 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 
 	expr = (OpExpr *) node;
-	opno = expr->opno;
+	// opno = expr->opno;
 
-	if (!IsTruncOptimizableComp(opno))
-		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+	// if (!IsTruncOptimizableComp(expr->opno))
+	// 	return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 
 	args = expr->args;
 
@@ -1066,83 +1082,204 @@ rewrite_date_trunc_comparisons(Node *node, void *context)
 	first_arg = (Node *) linitial(args);
 	second_arg = (Node *) lsecond(args);
 
-	if (IsA(first_arg, FuncExpr)) {
-		ffirst = (FuncExpr *) first_arg;
+	// if (IsA(first_arg, FuncExpr)) {
+	// 	FuncExpr *ffirst = (FuncExpr *) first_arg;
 
-		if (ffirst->funcid == F_TIMESTAMP_TRUNC) {
-			func = ffirst;
+	// 	if (ffirst->funcid == F_TIMESTAMP_TRUNC) {
+	// 		func = ffirst;
+	// 		threshold_arg = second_arg;
+	// 	}
+	// }
+
+	// if (!func && IsA(second_arg, FuncExpr)) {
+	// 	FuncExpr *fsecond = (FuncExpr *) second_arg;
+
+	// 	if (fsecond->funcid == F_TIMESTAMP_TRUNC) {
+	// 		dtsecond = true;
+	// 		func = fsecond;
+	// 		threshold_arg = first_arg;
+	// 	}
+	// }
+
+	/*
+	 * Expect format func_trunc(unit, var) op const  or
+	 * const op func_trunc(unit, var)
+	 */
+	if (IsA(first_arg, FuncExpr))
+	{
+		trunc_func = (FuncExpr *) first_arg;
+
+		if (trunc_func->funcid == F_TIMESTAMP_TRUNC)
 			threshold_arg = second_arg;
-		}
 	}
+	else if (IsA(second_arg, FuncExpr))
+	{
+		trunc_func = (FuncExpr *) second_arg;
 
-	if (!func && IsA(second_arg, FuncExpr)) {
-		fsecond = (FuncExpr *) second_arg;
-
-		if (fsecond->funcid == F_TIMESTAMP_TRUNC) {
-			dtsecond = true;
-			func = fsecond;
+		if (f->funcid == F_TIMESTAMP_TRUNC)
+		{
+			/*
+			 * Inverse comparison operator to transform expression to canonical
+			 * "func_trunc(unit, var) op const" format
+			 */
+			expr->args = list_make2(second_arg, first_arg);
+			expr->opno = get_commutator(expr->opno);
 			threshold_arg = first_arg;
 		}
 	}
-
-	/*
-	 * Not found date_trunc, continue recursively.
-	 */
-	if (!func)
+	else
+		/* Not found date_trunc, continue recursively */
 		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 
-	func_args = func->args;
-	if (list_length(func_args) != 2)
-		/*
-		 * This is probably not possible, date_trunc requires two arguments.
-		 */
-		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+	Assert(list_length(func_args) != 2);
+	func_args = trunc_func->args;
+	// if (list_length(func_args) != 2)
+	// 	/*
+	// 	 * This is probably not possible, date_trunc requires two arguments.
+	// 	 */
+	// 	return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
 
 	elog(NOTICE, "Applying date_trunc optimization...");
 
-	always_up = dtsecond != IsLeftTruncAlwaysUp(opno);
-	switch (opno)
+	tce = lookup_type_cache(exprType(threshold_arg), TYPECACHE_BTREE_OPFAMILY);
+	strategy = get_op_opfamily_strategy(expr->opno, tce->btree_opf);
+
+	// always_up = dtsecond != IsLeftTruncAlwaysUp(opno);
+	// switch (opno)
+	// {
+	// 	/*
+	// 	 * Extend for new data types handling.
+	// 	 * '>', '>=' converts into '>' if date_trunc is second argument, '>=' otherwise.
+	// 	 * '<', '<=' converts into '<=' if date_trunc is second argument, '<' otherwise.
+	// 	 */
+	// 	// Timestamps comparison
+	// 	case OID_TS_GR_TS_OP:
+	// 	case OID_TS_GRE_TS_OP:
+	// 		new_op = dtsecond ? OID_TS_GR_TS_OP : OID_TS_GRE_TS_OP;
+	// 		break;
+	// 	case OID_TS_LE_TS_OP:
+	// 	case OID_TS_LEE_TS_OP:
+	// 		new_op = dtsecond ? OID_TS_LEE_TS_OP : OID_TS_LE_TS_OP;
+	// 		break;
+	// 	default:
+	// 		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+	// }
+
+	/* If operator is not in opfamily */
+	if (strategy == InvalidStrategy || strategy == BTEqualStrategyNumber)
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	units_arg = linitial(func_args);
+
+	/* Expect const */
+	if (!IsA(units_arg, Const))
+		return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+
+	units = ((Const *) units_arg)->constvalue;
+	lowunits = downcase_truncate_identifier(VARDATA_ANY(units),
+											VARSIZE_ANY_EXHDR(units),
+											false);
+	type = DecodeUnits(0, lowunits, &val);
+
+	if (type == UNITS)
 	{
-		/*
-		 * Extend for new data types handling.
-		 * '>', '>=' converts into '>' if date_trunc is second argument, '>=' otherwise.
-		 * '<', '<=' converts into '<=' if date_trunc is second argument, '<' otherwise.
-		 */
-		// Timestamps comparison
-		case OID_TS_GR_TS_OP:
-		case OID_TS_GRE_TS_OP:
-			new_op = dtsecond ? OID_TS_GR_TS_OP : OID_TS_GRE_TS_OP;
-			break;
-		case OID_TS_LE_TS_OP:
-		case OID_TS_LEE_TS_OP:
-			new_op = dtsecond ? OID_TS_LEE_TS_OP : OID_TS_LE_TS_OP;
-			break;
-		default:
-			return expression_tree_mutator(node, rewrite_date_trunc_comparisons, context);
+		switch (val)
+		{
+			case DTK_YEAR:
+				interval = MAKE_INTERVAL(1, NULL, NULL, NULL, NULL, NULL, NULL);
+				break;
+			case DTK_QUARTER:
+				interval = MAKE_INTERVAL(NULL, 3, NULL, NULL, NULL, NULL, NULL);
+				break;
+			case DTK_MONTH:
+				interval = MAKE_INTERVAL(NULL, 1, NULL, NULL, NULL, NULL, NULL);
+				break;
+			case DTK_WEEK:
+				interval = MAKE_INTERVAL(NULL, NULL, 1, NULL, NULL, NULL, NULL);
+				break;
+			case DTK_DAY:
+				interval = MAKE_INTERVAL(NULL, NULL, NULL, 1, NULL, NULL, NULL);
+				break;
+			case DTK_HOUR:
+				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, 1, NULL, NULL);
+				break;
+			case DTK_MINUTE:
+				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, 1, NULL);
+				break;
+			case DTK_SECOND:
+				interval = MAKE_INTERVAL(NULL, NULL, NULL, NULL, NULL, NULL, 1);
+				break;
+			default:
+				elog(ERROR, "not supported");
+		}
+	}
+	else
+	{
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+				 errmsg("timestamp units \"%s\" not recognized",
+						lowunits)));
+		// result = 0;
 	}
 
 	/*
 	 * Build the new date_trunc function call (now on the other side of the comparison).
 	 */
-	units_arg = linitial(func_args);
-	new_func = copyObject(func);
-	new_func->funcid = new_funcid;
-	new_func->args = list_make3(units_arg, threshold_arg, makeBoolConst(always_up, false));
-	new_func->location = -1;
+	// units_arg = linitial(func_args);
+	// new_func = copyObject(func);
+	// new_func->funcid = new_funcid;
+	// new_func->args = list_make3(units_arg, threshold_arg, makeBoolConst(always_up, false));
+	// new_func->location = -1;
+	{
+		Oid plusop = OpernameGetOprid(list_make1(makeString("+")),
+									  exprType(threshold_arg), INTERVALOID);
+		Const *interval_const;
+		Expr *new_threshold;
+		Expr *internal_expr = lsecond(func_args);
+		int16 typlen;
+		bool typbyval;
+		int new_strategy;
+
+		get_typlenbyval(INTERVALOID, &typlen, &typbyval);
+
+		interval_const = makeConst(INTERVALOID,
+		  		  -1,
+				  InvalidOid,
+		  		  typlen,
+				  interval,
+		  		  false,
+				  typbyval);
+
+		new_threshold = make_opclause(plusop, exprType(threshold_arg), false,
+									  (Expr *) threshold_arg, (Expr *) interval_const,
+									  InvalidOid, InvalidOid);
+		// new_threshold = (Expr *) threshold_arg;
+
+		trunc_func->args = list_make2(units_arg, new_threshold);
+		expr->args = list_make2(internal_expr, func);
+		new_strategy = strategy == BTLessStrategyNumber || strategy == BTLessEqualStrategyNumber ?
+			BTLessStrategyNumber : BTGreaterStrategyNumber;
+		expr->opno = get_opfamily_member(tce->btree_opf,
+										 exprType((Node *) internal_expr),
+										 exprType((Node *) func),
+										 new_strategy);
+		return (Node *) expr;	
+	}
+	// func->args()
 
 	/*
 	 * Build the new comparison operator expression.
 	 */
-	truncated_arg = lsecond(func_args);
-	new_first_arg  = dtsecond ? (Node *) new_func : truncated_arg;
-	new_second_arg = dtsecond ? truncated_arg : (Node *) new_func;
+	// truncated_arg = lsecond(func_args);
+	// new_first_arg  = dtsecond ? (Node *) new_func : truncated_arg;
+	// new_second_arg = dtsecond ? truncated_arg : (Node *) new_func;
 
-	new_expr = copyObject(expr);
-	new_expr->opno = new_op;
-	new_expr->opfuncid = InvalidOid;
-	new_expr->args = list_make2(new_first_arg, new_second_arg);
-	new_expr->location = -1;
-	return (Node *) new_expr;
+	// new_expr = copyObject(expr);
+	// new_expr->opno = new_op;
+	// new_expr->opfuncid = InvalidOid;
+	// new_expr->args = list_make2(new_first_arg, new_second_arg);
+	// new_expr->location = -1;
+	// return (Node *) new_expr;
 }
 
 /*
