@@ -2432,9 +2432,9 @@
   proname => 'date_trunc', prorettype => 'interval',
   proargtypes => 'text interval', prosrc => 'interval_trunc' },
 { oid => '10221',
-  descr => 'truncate timestamp with time zone to specified units',
-  proname => 'date_trunc_up', provolatile => 's', prorettype => 'timestamptz',
-  proargtypes => 'text timestamptz', prosrc => 'timestamp_trunc_up' },
+  descr => 'truncate timestamp to specified units',
+  proname => 'date_trunc_up', provolatile => 'i', prorettype => 'timestamp',
+  proargtypes => 'text timestamp', prosrc => 'timestamp_trunc_up' },
 
 { oid => '1219', descr => 'increment',
   proname => 'int8inc', prorettype => 'int8', proargtypes => 'int8',
