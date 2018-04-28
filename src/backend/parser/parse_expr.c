@@ -101,6 +101,7 @@ static Node *transformAExprIn(ParseState *pstate, A_Expr *a);
 static Node *transformAExprBetween(ParseState *pstate, A_Expr *a);
 static Node *transformBoolExpr(ParseState *pstate, BoolExpr *a);
 static Node *transformFuncCall(ParseState *pstate, FuncCall *fn);
+static Node *transformMapExpr(ParseState *pstate, A_MapExpr *a_mapexpr);
 static Node *transformMultiAssignRef(ParseState *pstate, MultiAssignRef *maref);
 static Node *transformCaseExpr(ParseState *pstate, CaseExpr *c);
 static Node *transformSubLink(ParseState *pstate, SubLink *sublink);
@@ -257,6 +258,10 @@ transformExprRecurse(ParseState *pstate, Node *expr)
 				}
 				break;
 			}
+
+		case T_A_MapExpr:
+			result = transformMapExpr(pstate, (A_MapExpr *) expr);
+			break;
 
 		case T_BoolExpr:
 			result = transformBoolExpr(pstate, (BoolExpr *) expr);
@@ -1483,6 +1488,39 @@ transformFuncCall(ParseState *pstate, FuncCall *fn)
 							 fn,
 							 false,
 							 fn->location);
+}
+
+static Node *
+transformMapExpr(ParseState *pstate, A_MapExpr *a_mapexpr)
+{
+	MapExpr	   *ret = makeNode(MapExpr);
+	CaseTestExpr *ctest = makeNode(CaseTestExpr);
+	Node	   *arrexpr;
+	Oid			funcId;
+	Oid			sourceElemType;
+	Oid			targetElemType;
+	FuncExpr   *elemexpr;
+
+	arrexpr = transformExprRecurse(pstate, a_mapexpr->arrexpr);
+	sourceElemType = get_element_type(exprType(arrexpr));
+	if (sourceElemType == InvalidOid)
+		ereport(ERROR,
+				(errcode(ERRCODE_SYNTAX_ERROR),
+				 errmsg("array expected"),
+				 parser_errposition(pstate, exprLocation(a_mapexpr->arrexpr))));
+
+	/* Build per element expression */
+	funcId = LookupFuncName(a_mapexpr->funcname, 1, &sourceElemType, false);
+	targetElemType = get_func_rettype(funcId);
+	elemexpr = makeFuncExpr(funcId, targetElemType, list_make1(ctest),
+							InvalidOid, ((ArrayExpr *) arrexpr)->array_collid,
+							COERCE_EXPLICIT_CALL);
+
+	ret->arrexpr = (Expr *) arrexpr;
+	ret->elemexpr = (Expr *) elemexpr;
+	ret->resulttype = get_array_type(targetElemType);
+
+	return (Node *) ret;
 }
 
 static Node *

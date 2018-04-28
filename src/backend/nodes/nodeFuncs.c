@@ -80,6 +80,8 @@ exprType(const Node *expr)
 		case T_FuncExpr:
 			type = ((const FuncExpr *) expr)->funcresulttype;
 			break;
+		case T_MapExpr:
+			return ((MapExpr *) expr)->resulttype;
 		case T_NamedArgExpr:
 			type = exprType((Node *) ((const NamedArgExpr *) expr)->arg);
 			break;
@@ -750,6 +752,9 @@ exprCollation(const Node *expr)
 		case T_FuncExpr:
 			coll = ((const FuncExpr *) expr)->funccollid;
 			break;
+		case T_MapExpr:
+			coll = ((const MapExpr *) expr)->resultcollid;
+			break;
 		case T_NamedArgExpr:
 			coll = exprCollation((Node *) ((const NamedArgExpr *) expr)->arg);
 			break;
@@ -994,6 +999,9 @@ exprSetCollation(Node *expr, Oid collation)
 		case T_FuncExpr:
 			((FuncExpr *) expr)->funccollid = collation;
 			break;
+		case T_MapExpr:
+			((MapExpr *) expr)->resultcollid = collation;
+			break;
 		case T_NamedArgExpr:
 			Assert(collation == exprCollation((Node *) ((NamedArgExpr *) expr)->arg));
 			break;
@@ -1131,6 +1139,10 @@ exprSetInputCollation(Node *expr, Oid inputcollation)
 			break;
 		case T_FuncExpr:
 			((FuncExpr *) expr)->inputcollid = inputcollation;
+			break;
+		case T_MapExpr:
+			exprSetInputCollation((Node *) ((MapExpr *) expr)->elemexpr,
+								  inputcollation);
 			break;
 		case T_OpExpr:
 			((OpExpr *) expr)->inputcollid = inputcollation;
@@ -1937,6 +1949,16 @@ expression_tree_walker(Node *node,
 					return true;
 			}
 			break;
+		case T_MapExpr:
+			{
+				MapExpr	   *map = (MapExpr *) node;
+
+				if (walker((Node *) map->arrexpr, context))
+					return true;
+				if (walker((Node *) map->elemexpr, context))
+					return true;
+			}
+			break;
 		case T_NamedArgExpr:
 			return walker(((NamedArgExpr *) node)->arg, context);
 		case T_OpExpr:
@@ -2566,6 +2588,15 @@ expression_tree_mutator(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_MapExpr:
+			{
+				MapExpr	   *expr = (MapExpr *) node;
+				MapExpr	   *newnode;
+
+				FLATCOPY(newnode, expr, MapExpr);
+				MUTATE(newnode->arrexpr, expr->arrexpr, Expr *);
+				return (Node *) newnode;
+			}
 		case T_NamedArgExpr:
 			{
 				NamedArgExpr *nexpr = (NamedArgExpr *) node;

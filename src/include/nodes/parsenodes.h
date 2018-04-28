@@ -418,6 +418,17 @@ typedef struct A_ArrayExpr
 } A_ArrayExpr;
 
 /*
+ * A_MapExpr - array map expression
+ */
+typedef struct A_MapExpr
+{
+	NodeTag		type;
+	List	   *funcname;
+	Node	   *arrexpr;
+	int			location;		/* token location, or -1 if unknown */
+} A_MapExpr;
+
+/*
  * ResTarget -
  *	  result target (used in target list of pre-transformed parse trees)
  *
