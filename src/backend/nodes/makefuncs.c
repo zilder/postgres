@@ -600,6 +600,20 @@ makeFuncCall(List *name, List *args, int location)
 }
 
 /*
+ * makeMapExpr
+ *
+ */
+A_MapExpr *
+makeAMapExpr(List *funcname, Node *arrexpr)
+{
+	A_MapExpr *n = makeNode(A_MapExpr);
+
+	n->funcname = funcname;
+	n->arrexpr = arrexpr;
+	return n;
+}
+
+/*
  * makeGroupingSet
  *
  */
