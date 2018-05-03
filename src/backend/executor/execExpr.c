@@ -900,12 +900,7 @@ ExecInitExprRec(Expr *node, ExprState *state,
 							(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
 							 errmsg("target type is not an array")));
 
-				/*
-				 * Construct a sub-expression for the per-element expression;
-				 * but don't ready it until after we check it for triviality.
-				 * We assume it hasn't any Var references, but does have a
-				 * CaseTestExpr representing the source array element values.
-				 */
+				/* Construct a sub-expression for the per-element expression */
 				elemstate = makeNode(ExprState);
 				elemstate->expr = map->elemexpr;
 				elemstate->parent = state->parent;
@@ -916,20 +911,10 @@ ExecInitExprRec(Expr *node, ExprState *state,
 				ExecInitExprRec(map->elemexpr, elemstate,
 								&elemstate->resvalue, &elemstate->resnull);
 
-				if (elemstate->steps_len == 1 &&
-					elemstate->steps[0].opcode == EEOP_CASE_TESTVAL)
-				{
-					/* Trivial, so we need no per-element work at runtime */
-					elemstate = NULL;
-				}
-				else
-				{
-					/* Not trivial, so append a DONE step */
-					scratch.opcode = EEOP_DONE;
-					ExprEvalPushStep(elemstate, &scratch);
-					/* and ready the subexpression */
-					ExecReadyExpr(elemstate);
-				}
+				/* Append a DONE step and ready the subexpression */
+				scratch.opcode = EEOP_DONE;
+				ExprEvalPushStep(elemstate, &scratch);
+				ExecReadyExpr(elemstate);
 
 				scratch.opcode = EEOP_MAP;
 				scratch.d.map.elemexprstate = elemstate;
