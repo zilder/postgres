@@ -1493,34 +1493,50 @@ transformFuncCall(ParseState *pstate, FuncCall *fn)
 static Node *
 transformMapExpr(ParseState *pstate, A_MapExpr *a_mapexpr)
 {
-	MapExpr	   *ret = makeNode(MapExpr);
-	CaseTestExpr *ctest = makeNode(CaseTestExpr);
+	MapExpr	   *map;
+	CaseTestExpr *placeholder;
 	Node	   *arrexpr;
 	Oid			funcId;
 	Oid			sourceElemType;
 	Oid			targetElemType;
 	FuncExpr   *elemexpr;
+	Oid			collation;
 
 	arrexpr = transformExprRecurse(pstate, a_mapexpr->arrexpr);
+
 	sourceElemType = get_element_type(exprType(arrexpr));
 	if (sourceElemType == InvalidOid)
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("array expected"),
+				 errmsg("array expression is expected"),
 				 parser_errposition(pstate, exprLocation(a_mapexpr->arrexpr))));
 
-	/* Build per element expression */
+	collation = IsA(arrexpr, ArrayExpr) ?
+		get_typcollation(sourceElemType) :
+		exprCollation(arrexpr);
+
+	/* Create placeholder for per-element expression */
+	placeholder = makeNode(CaseTestExpr);
+	placeholder->typeId = sourceElemType;
+	placeholder->typeMod = exprTypmod(arrexpr); /* TODO: not arrexpr probably? */
+	placeholder->collation = collation;
+
+	/* Build per-element expression */
 	funcId = LookupFuncName(a_mapexpr->funcname, 1, &sourceElemType, false);
 	targetElemType = get_func_rettype(funcId);
-	elemexpr = makeFuncExpr(funcId, targetElemType, list_make1(ctest),
-							InvalidOid, ((ArrayExpr *) arrexpr)->array_collid,
+	elemexpr = makeFuncExpr(funcId,
+							targetElemType,
+							list_make1(placeholder),
+							InvalidOid,
+							InvalidOid,  /* will be set by parse_collate.c */
 							COERCE_EXPLICIT_CALL);
 
-	ret->arrexpr = (Expr *) arrexpr;
-	ret->elemexpr = (Expr *) elemexpr;
-	ret->resulttype = get_array_type(targetElemType);
+	map = makeNode(MapExpr);
+	map->arrexpr = (Expr *) arrexpr;
+	map->elemexpr = (Expr *) elemexpr;
+	map->resulttype = get_array_type(targetElemType);
 
-	return (Node *) ret;
+	return (Node *) map;
 }
 
 static Node *
