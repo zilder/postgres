@@ -1518,7 +1518,7 @@ transformMapExpr(ParseState *pstate, A_MapExpr *a_mapexpr)
 	/* Create placeholder for per-element expression */
 	placeholder = makeNode(CaseTestExpr);
 	placeholder->typeId = sourceElemType;
-	placeholder->typeMod = exprTypmod(arrexpr); /* TODO: not arrexpr probably? */
+	placeholder->typeMod = exprTypmod(arrexpr);
 	placeholder->collation = collation;
 
 	/* Build per-element expression */
