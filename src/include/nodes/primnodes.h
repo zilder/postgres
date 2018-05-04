@@ -469,7 +469,6 @@ typedef struct MapExpr
 	Expr	   *arrexpr;		/* source expression of array type */
 	Oid			resulttype;		/* OID of target array type */
 	Oid			resultcollid;	/* OID of collation, or InvalidOid if none */
-	/* TODO: add typmod */
 } MapExpr;
 
 /*
