@@ -13559,9 +13559,12 @@ c_expr:		columnref								{ $$ = $1; }
 			  }
 		;
 
-map_expr:	MAP '(' type_function_name OVER a_expr ')'
+map_expr:	MAP '(' a_expr FOR IDENT IN_P a_expr ')'
 				{
-					A_MapExpr *m = makeAMapExpr(list_make1(makeString($3)), $5);
+					A_MapExpr *m = makeNode(A_MapExpr);
+					m->elemexpr = $3;
+					m->placeholder = $5;
+					m->arrexpr = $7;
 					m->location = @1;
 					$$ = (Node *)m;
 				}

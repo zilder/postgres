@@ -1499,42 +1499,44 @@ transformMapExpr(ParseState *pstate, A_MapExpr *a_mapexpr)
 	Oid			funcId;
 	Oid			sourceElemType;
 	Oid			targetElemType;
-	FuncExpr   *elemexpr;
+	Node	   *elemexpr;
 	Oid			collation;
 
 	arrexpr = transformExprRecurse(pstate, a_mapexpr->arrexpr);
+	elemexpr = transformExprRecurse(pstate, a_mapexpr->elemexpr);
 
-	sourceElemType = get_element_type(exprType(arrexpr));
-	if (sourceElemType == InvalidOid)
-		ereport(ERROR,
-				(errcode(ERRCODE_SYNTAX_ERROR),
-				 errmsg("array expression is expected"),
-				 parser_errposition(pstate, exprLocation(a_mapexpr->arrexpr))));
+	// sourceElemType = get_element_type(exprType(arrexpr));
+	// if (sourceElemType == InvalidOid)
+	// 	ereport(ERROR,
+	// 			(errcode(ERRCODE_SYNTAX_ERROR),
+	// 			 errmsg("array expression is expected"),
+	// 			 parser_errposition(pstate, exprLocation(a_mapexpr->arrexpr))));
 
-	collation = IsA(arrexpr, ArrayExpr) ?
-		get_typcollation(sourceElemType) :
-		exprCollation(arrexpr);
+	// collation = IsA(arrexpr, ArrayExpr) ?
+	// 	get_typcollation(sourceElemType) :
+	// 	exprCollation(arrexpr);
 
-	/* Create placeholder for per-element expression */
-	placeholder = makeNode(CaseTestExpr);
-	placeholder->typeId = sourceElemType;
-	placeholder->typeMod = exprTypmod(arrexpr);
-	placeholder->collation = collation;
+	// /* Create placeholder for per-element expression */
+	// placeholder = makeNode(CaseTestExpr);
+	// placeholder->typeId = sourceElemType;
+	// placeholder->typeMod = exprTypmod(arrexpr);
+	// placeholder->collation = collation;
 
-	/* Build per-element expression */
-	funcId = LookupFuncName(a_mapexpr->funcname, 1, &sourceElemType, false);
-	targetElemType = get_func_rettype(funcId);
-	elemexpr = makeFuncExpr(funcId,
-							targetElemType,
-							list_make1(placeholder),
-							InvalidOid,
-							InvalidOid,  /* will be set by parse_collate.c */
-							COERCE_EXPLICIT_CALL);
+	// /* Build per-element expression */
+	// funcId = LookupFuncName(a_mapexpr->funcname, 1, &sourceElemType, false);
+	// targetElemType = get_func_rettype(funcId);
+	// elemexpr = makeFuncExpr(funcId,
+	// 						targetElemType,
+	// 						list_make1(placeholder),
+	// 						InvalidOid,
+	// 						InvalidOid,  /* will be set by parse_collate.c */
+	// 						COERCE_EXPLICIT_CALL);
 
 	map = makeNode(MapExpr);
 	map->arrexpr = (Expr *) arrexpr;
 	map->elemexpr = (Expr *) elemexpr;
-	map->resulttype = get_array_type(targetElemType);
+	// map->resulttype = get_array_type(targetElemType);
+	map->resulttype = get_array_type(exprType(elemexpr));
 
 	return (Node *) map;
 }

@@ -2797,7 +2797,8 @@ _outAMapExpr(StringInfo str, const A_MapExpr *node)
 {
 	WRITE_NODE_TYPE("A_MAPEXPR");
 
-	WRITE_NODE_FIELD(funcname);
+	WRITE_NODE_FIELD(elemexpr);
+	WRITE_STRING_FIELD(placeholder);
 	WRITE_NODE_FIELD(arrexpr);
 	WRITE_LOCATION_FIELD(location);
 }

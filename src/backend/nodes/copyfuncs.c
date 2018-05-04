@@ -2626,7 +2626,8 @@ _copyAMapExpr(const A_MapExpr *from)
 {
 	A_MapExpr   *newnode = makeNode(A_MapExpr);
 
-	COPY_NODE_FIELD(funcname);
+	COPY_NODE_FIELD(elemexpr);
+	COPY_STRING_FIELD(placeholder);
 	COPY_NODE_FIELD(arrexpr);
 	COPY_LOCATION_FIELD(location);
 
