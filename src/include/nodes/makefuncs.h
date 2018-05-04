@@ -79,7 +79,6 @@ extern FuncExpr *makeFuncExpr(Oid funcid, Oid rettype, List *args,
 			 Oid funccollid, Oid inputcollid, CoercionForm fformat);
 
 extern FuncCall *makeFuncCall(List *name, List *args, int location);
-extern A_MapExpr * makeAMapExpr(List *funcname, Node *arrexpr);
 
 extern DefElem *makeDefElem(char *name, Node *arg, int location);
 extern DefElem *makeDefElemExtended(char *nameSpace, char *name, Node *arg,

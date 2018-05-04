@@ -2352,7 +2352,8 @@ _equalFuncCall(const FuncCall *a, const FuncCall *b)
 static bool
 _equalAMapExpr(const A_MapExpr *a, const A_MapExpr *b)
 {
-	COMPARE_NODE_FIELD(funcname);
+	COMPARE_NODE_FIELD(elemexpr);
+	COMPARE_STRING_FIELD(placeholder);
 	COMPARE_NODE_FIELD(arrexpr);
 	COMPARE_LOCATION_FIELD(location);
 

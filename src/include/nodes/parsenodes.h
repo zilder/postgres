@@ -423,7 +423,8 @@ typedef struct A_ArrayExpr
 typedef struct A_MapExpr
 {
 	NodeTag		type;
-	List	   *funcname;
+	Node	   *elemexpr;
+	char	   *placeholder;
 	Node	   *arrexpr;
 	int			location;		/* token location, or -1 if unknown */
 } A_MapExpr;
