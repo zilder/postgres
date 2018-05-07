@@ -2501,6 +2501,9 @@ expression_tree_mutator(Node *node,
 		case T_NextValueExpr:
 		case T_RangeTblRef:
 		case T_SortGroupClause:
+		case T_ColumnRef:
+		case T_ParamRef:
+		case T_A_Const:
 			return (Node *) copyObject(node);
 		case T_WithCheckOption:
 			{
@@ -3091,6 +3094,36 @@ expression_tree_mutator(Node *node,
 				return (Node *) newnode;
 			}
 			break;
+		case T_A_Expr:
+			{
+				A_Expr	   *expr = (A_Expr *) node;
+				A_Expr	   *newnode;
+
+				FLATCOPY(newnode, expr, A_Expr);
+				MUTATE(newnode->lexpr, expr->lexpr, Node *);
+				MUTATE(newnode->rexpr, expr->rexpr, Node *);
+				return (Node *) newnode;
+			}
+			break;
+		case T_FuncCall:
+			{
+				FuncCall   *fc = (FuncCall *) node;
+				FuncCall   *newnode;
+
+				FLATCOPY(newnode, fc, FuncCall);
+				MUTATE(newnode->args, fc->args, List *);
+				return (Node *) newnode;
+			}
+		case T_TypeCast:
+			{
+				TypeCast   *tc = (TypeCast *) node;
+				TypeCast   *newnode;
+
+				FLATCOPY(newnode, tc, TypeCast);
+				MUTATE(newnode->arg, tc->arg, Node *);
+				return (Node *) newnode;
+			}
+
 		default:
 			elog(ERROR, "unrecognized node type: %d",
 				 (int) nodeTag(node));
