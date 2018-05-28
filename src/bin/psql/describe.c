@@ -2070,7 +2070,7 @@ describeOneTableDetails(const char *schemaname,
 		PGresult   *result;
 
 		printfPQExpBuffer(&buf,
-						  "SELECT i.indisunique, i.indisprimary, i.indisclustered, ");
+						  "SELECT i.indisunique, i.indisprimary, i.indisglobal, i.indisclustered, ");
 		if (pset.sversion >= 80200)
 			appendPQExpBufferStr(&buf, "i.indisvalid,\n");
 		else
@@ -2117,14 +2117,15 @@ describeOneTableDetails(const char *schemaname,
 		{
 			char	   *indisunique = PQgetvalue(result, 0, 0);
 			char	   *indisprimary = PQgetvalue(result, 0, 1);
-			char	   *indisclustered = PQgetvalue(result, 0, 2);
-			char	   *indisvalid = PQgetvalue(result, 0, 3);
-			char	   *deferrable = PQgetvalue(result, 0, 4);
-			char	   *deferred = PQgetvalue(result, 0, 5);
-			char	   *indisreplident = PQgetvalue(result, 0, 6);
-			char	   *indamname = PQgetvalue(result, 0, 7);
-			char	   *indtable = PQgetvalue(result, 0, 8);
-			char	   *indpred = PQgetvalue(result, 0, 9);
+			char	   *indisglobal = PQgetvalue(result, 0, 2);
+			char	   *indisclustered = PQgetvalue(result, 0, 3);
+			char	   *indisvalid = PQgetvalue(result, 0, 4);
+			char	   *deferrable = PQgetvalue(result, 0, 5);
+			char	   *deferred = PQgetvalue(result, 0, 6);
+			char	   *indisreplident = PQgetvalue(result, 0, 7);
+			char	   *indamname = PQgetvalue(result, 0, 8);
+			char	   *indtable = PQgetvalue(result, 0, 9);
+			char	   *indpred = PQgetvalue(result, 0, 10);
 
 			if (strcmp(indisprimary, "t") == 0)
 				printfPQExpBuffer(&tmpbuf, _("primary key, "));
@@ -2132,6 +2133,10 @@ describeOneTableDetails(const char *schemaname,
 				printfPQExpBuffer(&tmpbuf, _("unique, "));
 			else
 				resetPQExpBuffer(&tmpbuf);
+
+			if (strcmp(indisglobal, "t") == 0)
+				appendPQExpBufferStr(&tmpbuf, _("global, "));
+
 			appendPQExpBuffer(&tmpbuf, "%s, ", indamname);
 
 			/* we assume here that index and table are in same schema */
@@ -2176,7 +2181,7 @@ describeOneTableDetails(const char *schemaname,
 		if (tableinfo.hasindex)
 		{
 			printfPQExpBuffer(&buf,
-							  "SELECT c2.relname, i.indisprimary, i.indisunique, i.indisclustered, ");
+							  "SELECT c2.relname, i.indisprimary, i.indisunique, i.indisglobal, i.indisclustered, ");
 			if (pset.sversion >= 80200)
 				appendPQExpBufferStr(&buf, "i.indisvalid, ");
 			else
@@ -2221,10 +2226,10 @@ describeOneTableDetails(const char *schemaname,
 									  PQgetvalue(result, i, 0));
 
 					/* If exclusion constraint, print the constraintdef */
-					if (strcmp(PQgetvalue(result, i, 7), "x") == 0)
+					if (strcmp(PQgetvalue(result, i, 8), "x") == 0)
 					{
 						appendPQExpBuffer(&buf, " %s",
-										  PQgetvalue(result, i, 6));
+										  PQgetvalue(result, i, 7));
 					}
 					else
 					{
@@ -2236,35 +2241,38 @@ describeOneTableDetails(const char *schemaname,
 							appendPQExpBufferStr(&buf, " PRIMARY KEY,");
 						else if (strcmp(PQgetvalue(result, i, 2), "t") == 0)
 						{
-							if (strcmp(PQgetvalue(result, i, 7), "u") == 0)
+							if (strcmp(PQgetvalue(result, i, 8), "u") == 0)
 								appendPQExpBufferStr(&buf, " UNIQUE CONSTRAINT,");
 							else
 								appendPQExpBufferStr(&buf, " UNIQUE,");
 						}
 
+						if (strcmp(PQgetvalue(result, i, 3), "t") == 0)
+							appendPQExpBufferStr(&buf, " GLOBAL,");
+
 						/* Everything after "USING" is echoed verbatim */
-						indexdef = PQgetvalue(result, i, 5);
+						indexdef = PQgetvalue(result, i, 6);
 						usingpos = strstr(indexdef, " USING ");
 						if (usingpos)
 							indexdef = usingpos + 7;
 						appendPQExpBuffer(&buf, " %s", indexdef);
 
 						/* Need these for deferrable PK/UNIQUE indexes */
-						if (strcmp(PQgetvalue(result, i, 8), "t") == 0)
+						if (strcmp(PQgetvalue(result, i, 9), "t") == 0)
 							appendPQExpBufferStr(&buf, " DEFERRABLE");
 
-						if (strcmp(PQgetvalue(result, i, 9), "t") == 0)
+						if (strcmp(PQgetvalue(result, i, 10), "t") == 0)
 							appendPQExpBufferStr(&buf, " INITIALLY DEFERRED");
 					}
 
 					/* Add these for all cases */
-					if (strcmp(PQgetvalue(result, i, 3), "t") == 0)
+					if (strcmp(PQgetvalue(result, i, 4), "t") == 0)
 						appendPQExpBufferStr(&buf, " CLUSTER");
 
-					if (strcmp(PQgetvalue(result, i, 4), "t") != 0)
+					if (strcmp(PQgetvalue(result, i, 5), "t") != 0)
 						appendPQExpBufferStr(&buf, " INVALID");
 
-					if (strcmp(PQgetvalue(result, i, 10), "t") == 0)
+					if (strcmp(PQgetvalue(result, i, 11), "t") == 0)
 						appendPQExpBuffer(&buf, " REPLICA IDENTITY");
 
 					printTableAddFooter(&cont, buf.data);
@@ -2272,7 +2280,7 @@ describeOneTableDetails(const char *schemaname,
 					/* Print tablespace of the index on the same line */
 					if (pset.sversion >= 80000)
 						add_tablespace_footer(&cont, RELKIND_INDEX,
-											  atooid(PQgetvalue(result, i, 11)),
+											  atooid(PQgetvalue(result, i, 12)),
 											  false);
 				}
 			}

@@ -33,6 +33,7 @@ CATALOG(pg_index,2610,IndexRelationId) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 	int16		indnatts;		/* total number of columns in index */
 	int16		indnkeyatts;	/* number of key columns in index */
 	bool		indisunique;	/* is this a unique index? */
+	bool		indisglobal;	/* is this a global index? */
 	bool		indisprimary;	/* is this index for primary key? */
 	bool		indisexclusion; /* is this index for exclusion constraint? */
 	bool		indimmediate;	/* is uniqueness enforced immediately? */
@@ -50,6 +51,8 @@ CATALOG(pg_index,2610,IndexRelationId) BKI_WITHOUT_OIDS BKI_SCHEMA_MACRO
 	oidvector	indcollation;	/* collation identifiers */
 	oidvector	indclass;		/* opclass identifiers */
 	int2vector	indoption;		/* per-column flags (AM-specific meanings) */
+	oidvector	indinvalidoids;	/* oids of dropped partitions which are used
+								 * in vacuum process; should be sorted */
 	pg_node_tree indexprs;		/* expression trees for index attributes that
 								 * are not simple column references; one for
 								 * each zero entry in indkey[] */

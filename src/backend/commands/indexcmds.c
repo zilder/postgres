@@ -351,6 +351,7 @@ DefineIndex(Oid relationId,
 	IndexAmRoutine *amRoutine;
 	bool		amcanorder;
 	amoptions_function amoptions;
+	bool		global;
 	bool		partitioned;
 	Datum		reloptions;
 	int16	   *coloptions;
@@ -448,6 +449,8 @@ DefineIndex(Oid relationId,
 							RelationGetRelationName(rel))));
 			break;
 	}
+
+	global = stmt->global;
 
 	/*
 	 * Establish behavior for partitioned tables, and verify sanity of
@@ -647,6 +650,7 @@ DefineIndex(Oid relationId,
 	indexInfo->ii_ExclusionProcs = NULL;
 	indexInfo->ii_ExclusionStrats = NULL;
 	indexInfo->ii_Unique = stmt->unique;
+	indexInfo->ii_Global = stmt->global;
 	/* In a concurrent build, mark it not-ready-for-inserts */
 	indexInfo->ii_ReadyForInserts = !stmt->concurrent;
 	indexInfo->ii_Concurrent = stmt->concurrent;
@@ -828,7 +832,7 @@ DefineIndex(Oid relationId,
 	flags = constr_flags = 0;
 	if (stmt->isconstraint)
 		flags |= INDEX_CREATE_ADD_CONSTRAINT;
-	if (skip_build || stmt->concurrent || partitioned)
+	if (skip_build || stmt->concurrent || (partitioned && !global))
 		flags |= INDEX_CREATE_SKIP_BUILD;
 	if (stmt->if_not_exists)
 		flags |= INDEX_CREATE_IF_NOT_EXISTS;
@@ -870,7 +874,7 @@ DefineIndex(Oid relationId,
 		CreateComments(indexRelationId, RelationRelationId, 0,
 					   stmt->idxcomment);
 
-	if (partitioned)
+	if (partitioned && !indexInfo->ii_Global)
 	{
 		/*
 		 * Unless caller specified to skip this step (via ONLY), process each

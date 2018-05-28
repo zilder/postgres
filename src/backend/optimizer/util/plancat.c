@@ -153,8 +153,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 	 * Make list of indexes.  Ignore indexes on system catalogs if told to.
 	 * Don't bother with indexes for an inheritance parent, either.
 	 */
-	if (inhparent ||
-		(IgnoreSystemIndexes && IsSystemRelation(relation)))
+	// if (inhparent ||
+	if (IgnoreSystemIndexes && IsSystemRelation(relation))
 		hasindex = false;
 	else
 		hasindex = relation->rd_rel->relhasindex;
@@ -214,7 +214,8 @@ get_relation_info(PlannerInfo *root, Oid relationObjectId, bool inhparent,
 			 * Ignore partitioned indexes, since they are not usable for
 			 * queries.
 			 */
-			if (indexRelation->rd_rel->relkind == RELKIND_PARTITIONED_INDEX)
+			if (indexRelation->rd_rel->relkind == RELKIND_PARTITIONED_INDEX
+				&& !index->indisglobal)
 			{
 				index_close(indexRelation, NoLock);
 				continue;

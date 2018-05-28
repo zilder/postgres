@@ -30,7 +30,7 @@ typedef struct PartitionDescData
 	PartitionBoundInfo boundinfo;	/* collection of partition bounds */
 } PartitionDescData;
 
-extern Oid	get_partition_parent(Oid relid);
+extern Oid	get_partition_parent(Oid relid, bool missing_ok);
 extern List *get_partition_ancestors(Oid relid);
 extern List *map_partition_varattnos(List *expr, int fromrel_varno,
 						Relation to_rel, Relation from_rel,

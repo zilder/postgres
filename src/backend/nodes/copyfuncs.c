@@ -3442,6 +3442,7 @@ _copyIndexStmt(const IndexStmt *from)
 	COPY_SCALAR_FIELD(indexOid);
 	COPY_SCALAR_FIELD(oldNode);
 	COPY_SCALAR_FIELD(unique);
+	COPY_SCALAR_FIELD(global);
 	COPY_SCALAR_FIELD(primary);
 	COPY_SCALAR_FIELD(isconstraint);
 	COPY_SCALAR_FIELD(deferrable);

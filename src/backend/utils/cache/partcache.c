@@ -871,7 +871,7 @@ generate_partition_qual(Relation rel)
 		return copyObject(rel->rd_partcheck);
 
 	/* Grab at least an AccessShareLock on the parent table */
-	parent = heap_open(get_partition_parent(RelationGetRelid(rel)),
+	parent = heap_open(get_partition_parent(RelationGetRelid(rel), false),
 					   AccessShareLock);
 
 	/* Get pg_class.relpartbound */

@@ -20,6 +20,7 @@
 #include "access/itup.h"
 #include "access/tupdesc.h"
 #include "storage/spin.h"
+#include "utils/hsearch.h"
 
 /*
  * Shared state for parallel heap scan.
@@ -88,7 +89,9 @@ typedef struct IndexScanDescData
 {
 	/* scan parameters */
 	Relation	heapRelation;	/* heap relation descriptor, or NULL */
+	Relation	origHeapRelation; /* original relation if index is global */
 	Relation	indexRelation;	/* index relation descriptor */
+	HTAB	   *heapRelationsMap; /* heap relations hash table (for global index) */
 	Snapshot	xs_snapshot;	/* snapshot to see */
 	int			numberOfKeys;	/* number of index qualifier conditions */
 	int			numberOfOrderBys;	/* number of ordering operators */
@@ -102,6 +105,9 @@ typedef struct IndexScanDescData
 	bool		ignore_killed_tuples;	/* do not return killed entries */
 	bool		xactStartedInRecovery;	/* prevents killing/seeing killed
 										 * tuples */
+
+	Oid		   *invalidoids;	/* dropped partitions oids */
+	int			ninvalidoids;
 
 	/* index access method's private state */
 	void	   *opaque;			/* access-method-specific info */

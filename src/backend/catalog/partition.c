@@ -50,7 +50,7 @@ static void get_partition_ancestors_worker(Relation inhRel, Oid relid,
  * when it is known that the relation is a partition.
  */
 Oid
-get_partition_parent(Oid relid)
+get_partition_parent(Oid relid, bool missing_ok)
 {
 	Relation	catalogRelation;
 	Oid			result;
@@ -59,7 +59,7 @@ get_partition_parent(Oid relid)
 
 	result = get_partition_parent_worker(catalogRelation, relid);
 
-	if (!OidIsValid(result))
+	if (!OidIsValid(result) && !missing_ok)
 		elog(ERROR, "could not find tuple for parent of relation %u", relid);
 
 	heap_close(catalogRelation, AccessShareLock);

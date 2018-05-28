@@ -21,6 +21,8 @@
 #include "utils/relcache.h"
 #include "utils/snapshot.h"
 
+#include "access/itup.h"
+
 /* We don't want this file to depend on execnodes.h. */
 struct IndexInfo;
 
@@ -49,6 +51,8 @@ typedef struct IndexVacuumInfo
 	int			message_level;	/* ereport level for progress messages */
 	double		num_heap_tuples;	/* tuples remaining in heap */
 	BufferAccessStrategy strategy;	/* access strategy for reads */
+	Oid		   *invalidoids;	/* relids of dropped partitions */
+	int			ninvalidoids;
 } IndexVacuumInfo;
 
 /*
@@ -202,5 +206,7 @@ extern SysScanDesc systable_beginscan_ordered(Relation heapRelation,
 extern HeapTuple systable_getnext_ordered(SysScanDesc sysscan,
 						 ScanDirection direction);
 extern void systable_endscan_ordered(SysScanDesc sysscan);
+
+extern Oid index_tuple_extract_relid(IndexTuple itup, TupleDesc desc);
 
 #endif							/* GENAM_H */

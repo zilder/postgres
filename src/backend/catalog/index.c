@@ -126,6 +126,7 @@ static void UpdateIndexRelation(Oid indexoid, Oid heapoid,
 					bool isready);
 static void index_update_stats(Relation rel,
 				   bool hasindex,
+				   bool isglobal,
 				   double reltuples);
 static void IndexCheckExclusion(Relation heapRelation,
 					Relation indexRelation,
@@ -305,6 +306,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	TupleDesc	indexTupDesc;
 	int			natts;			/* #atts in heap rel --- for error checks */
 	int			i;
+	Form_pg_attribute to;
 
 	/* We need access to the index AM's API struct */
 	amroutine = GetIndexAmRoutineByAmId(accessMethodObjectId, false);
@@ -316,7 +318,7 @@ ConstructTupleDescriptor(Relation heapRelation,
 	/*
 	 * allocate the new tuple descriptor
 	 */
-	indexTupDesc = CreateTemplateTupleDesc(numatts, false);
+	indexTupDesc = CreateTemplateTupleDesc(indexInfo->ii_Global ? numatts + 1 : numatts, false);
 
 	/*
 	 * For simple index columns, we copy the pg_attribute row from the parent
@@ -326,11 +328,12 @@ ConstructTupleDescriptor(Relation heapRelation,
 	for (i = 0; i < numatts; i++)
 	{
 		AttrNumber	atnum = indexInfo->ii_IndexAttrNumbers[i];
-		Form_pg_attribute to = TupleDescAttr(indexTupDesc, i);
 		HeapTuple	tuple;
 		Form_pg_type typeTup;
 		Form_pg_opclass opclassTup;
 		Oid			keyType;
+
+		to = TupleDescAttr(indexTupDesc, i);
 
 		if (atnum != 0)
 		{
@@ -506,6 +509,35 @@ ConstructTupleDescriptor(Relation heapRelation,
 		}
 	}
 
+	/* Add relid attribute for global index */
+	if (indexInfo->ii_Global)
+	{
+		HeapTuple	tuple;
+		Form_pg_type typeTup;
+
+		to = TupleDescAttr(indexTupDesc, i);
+		MemSet(to, 0, ATTRIBUTE_FIXED_PART_SIZE);
+
+		tuple = SearchSysCache1(TYPEOID, ObjectIdGetDatum(OIDOID));
+		Assert(HeapTupleIsValid(tuple));
+		typeTup = (Form_pg_type) GETSTRUCT(tuple);
+
+		to->attnum = i + 1;
+		to->atttypid = OIDOID;
+		to->attlen = typeTup->typlen;
+		to->attbyval = typeTup->typbyval;
+		to->attstorage = typeTup->typstorage;
+		to->attalign = typeTup->typalign;
+		to->attstattarget = -1;
+		to->attcacheoff = -1;
+		to->atttypmod = typeTup->typtypmod;
+		to->attislocal = true;
+		to->attcollation = InvalidOid;
+		namestrcpy(&to->attname, "relid");
+
+		ReleaseSysCache(tuple);
+	}
+
 	pfree(amroutine);
 
 	return indexTupDesc;
@@ -596,6 +628,7 @@ UpdateIndexRelation(Oid indexoid,
 	oidvector  *indcollation;
 	oidvector  *indclass;
 	int2vector *indoption;
+	oidvector  *indinvalidoids;
 	Datum		exprsDatum;
 	Datum		predDatum;
 	Datum		values[Natts_pg_index];
@@ -603,17 +636,43 @@ UpdateIndexRelation(Oid indexoid,
 	Relation	pg_index;
 	HeapTuple	tuple;
 	int			i;
+	int			numatts = indexInfo->ii_NumIndexAttrs;
+	int			extra_atts = indexInfo->ii_Global ? 1 : 0;
 
 	/*
 	 * Copy the index key, opclass, and indoption info into arrays (should we
 	 * make the caller pass them like this to start with?)
 	 */
-	indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
-	for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// indkey = buildint2vector(NULL, indexInfo->ii_NumIndexAttrs);
+	// for (i = 0; i < indexInfo->ii_NumIndexAttrs; i++)
+	// 	indkey->values[i] = indexInfo->ii_KeyAttrNumbers[i];
+	// indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexAttrs);
+	// indclass = buildoidvector(classOids, indexInfo->ii_NumIndexAttrs);
+	// indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexAttrs);
+
+	indkey = buildint2vector(NULL, numatts + extra_atts);
+	for (i = 0; i < numatts; i++)
 		indkey->values[i] = indexInfo->ii_IndexAttrNumbers[i];
-	indcollation = buildoidvector(collationOids, indexInfo->ii_NumIndexKeyAttrs);
-	indclass = buildoidvector(classOids, indexInfo->ii_NumIndexKeyAttrs);
-	indoption = buildint2vector(coloptions, indexInfo->ii_NumIndexKeyAttrs);
+
+	indcollation = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indcollation->values, collationOids, numatts * sizeof(Oid));
+
+	indclass = buildoidvector(NULL, numatts + extra_atts);
+	memcpy(indclass->values, classOids, numatts * sizeof(Oid));
+
+	indoption = buildint2vector(NULL, numatts + extra_atts);
+	memcpy(indoption->values, coloptions, numatts * sizeof(int16));
+
+	indinvalidoids = buildoidvector(NULL, 0);
+
+	if (extra_atts)
+	{
+		/* TODO */
+		indkey->values[numatts] = 0;
+		indcollation->values[numatts] = 0;
+		indoption->values[numatts] = 0;
+		indclass->values[numatts] = OID_BTREE_OPS_OID;
+	}
 
 	/*
 	 * Convert the index expressions (if any) to a text datum
@@ -659,6 +718,7 @@ UpdateIndexRelation(Oid indexoid,
 	values[Anum_pg_index_indnatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexAttrs);
 	values[Anum_pg_index_indnkeyatts - 1] = Int16GetDatum(indexInfo->ii_NumIndexKeyAttrs);
 	values[Anum_pg_index_indisunique - 1] = BoolGetDatum(indexInfo->ii_Unique);
+	values[Anum_pg_index_indisglobal - 1] = BoolGetDatum(indexInfo->ii_Global);
 	values[Anum_pg_index_indisprimary - 1] = BoolGetDatum(primary);
 	values[Anum_pg_index_indisexclusion - 1] = BoolGetDatum(isexclusion);
 	values[Anum_pg_index_indimmediate - 1] = BoolGetDatum(immediate);
@@ -672,6 +732,7 @@ UpdateIndexRelation(Oid indexoid,
 	values[Anum_pg_index_indcollation - 1] = PointerGetDatum(indcollation);
 	values[Anum_pg_index_indclass - 1] = PointerGetDatum(indclass);
 	values[Anum_pg_index_indoption - 1] = PointerGetDatum(indoption);
+	values[Anum_pg_index_indinvalidoids - 1] = PointerGetDatum(indinvalidoids);
 	values[Anum_pg_index_indexprs - 1] = exprsDatum;
 	if (exprsDatum == (Datum) 0)
 		nulls[Anum_pg_index_indexprs - 1] = true;
@@ -781,10 +842,14 @@ index_create(Relation heapRelation,
 	/* constraint flags can only be set when a constraint is requested */
 	Assert((constr_flags == 0) ||
 		   ((flags & INDEX_CREATE_ADD_CONSTRAINT) != 0));
-	/* partitioned indexes must never be "built" by themselves */
-	Assert(!partitioned || (flags & INDEX_CREATE_SKIP_BUILD));
+	/*
+	 * partitioned indexes must never be "built" by themselves (except global
+	 * indexes)
+	 */
+	Assert(!(partitioned && !indexInfo->ii_Global) ||
+		   (flags & INDEX_CREATE_SKIP_BUILD));
 
-	relkind = partitioned ? RELKIND_PARTITIONED_INDEX : RELKIND_INDEX;
+	relkind = partitioned && !indexInfo->ii_Global ? RELKIND_PARTITIONED_INDEX : RELKIND_INDEX;
 	is_exclusion = (indexInfo->ii_ExclusionOps != NULL);
 
 	pg_class = heap_open(RelationRelationId, RowExclusiveLock);
@@ -954,13 +1019,13 @@ index_create(Relation heapRelation,
 	 * index relation's tuple descriptor
 	 */
 	InitializeAttributeOids(indexRelation,
-							indexInfo->ii_NumIndexAttrs,
+							indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0),
 							indexRelationId);
 
 	/*
 	 * append ATTRIBUTE tuples for the index
 	 */
-	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs);
+	AppendAttributeTuples(indexRelation, indexInfo->ii_NumIndexAttrs + (indexInfo->ii_Global ? 1 : 0));
 
 	/* ----------------
 	 *	  update pg_index
@@ -1178,6 +1243,7 @@ index_create(Relation heapRelation,
 		 */
 		index_update_stats(heapRelation,
 						   true,
+						   indexInfo->ii_Global,
 						   -1.0);
 		/* Make the above update visible */
 		CommandCounterIncrement();
@@ -1787,6 +1853,7 @@ BuildIndexInfo(Relation index)
 
 	/* other info */
 	ii->ii_Unique = indexStruct->indisunique;
+	ii->ii_Global = indexStruct->indisglobal;
 	ii->ii_ReadyForInserts = IndexIsReady(indexStruct);
 	/* assume not doing speculative insertion for now */
 	ii->ii_UniqueOps = NULL;
@@ -2052,6 +2119,35 @@ FormIndexDatum(IndexInfo *indexInfo,
 }
 
 
+static void
+partitions_set_hasindex(Relation pg_class, Oid parent, bool hasindex)
+{
+	List *children = find_inheritance_children(parent, ShareLock);
+	ListCell *lc;
+
+	foreach (lc, children)
+	{
+		Oid			relid = lfirst_oid(lc);
+		HeapTuple	tuple;
+		Form_pg_class rd_rel;
+
+		tuple = SearchSysCacheCopy1(RELOID, ObjectIdGetDatum(relid));
+		rd_rel = (Form_pg_class) GETSTRUCT(tuple);
+		if (rd_rel->relhasindex != hasindex)
+		{
+			rd_rel->relhasindex = hasindex;
+			heap_inplace_update(pg_class, tuple);
+		}
+
+		/* Expand partitioned relations */
+		if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+			children = list_concat(children,
+								   find_inheritance_children(relid, AccessShareLock));
+
+		heap_freetuple(tuple);
+	}
+}
+
 /*
  * index_update_stats --- update pg_class entry after CREATE INDEX or REINDEX
  *
@@ -2076,6 +2172,7 @@ FormIndexDatum(IndexInfo *indexInfo,
 static void
 index_update_stats(Relation rel,
 				   bool hasindex,
+				   bool isglobal,
 				   double reltuples)
 {
 	Oid			relid = RelationGetRelid(rel);
@@ -2157,10 +2254,11 @@ index_update_stats(Relation rel,
 		rd_rel->relhasindex = hasindex;
 		dirty = true;
 	}
+	if (rd_rel->relkind == RELKIND_PARTITIONED_TABLE)
+		partitions_set_hasindex(pg_class, RelationGetRelid(rel), hasindex);
 
 	if (reltuples >= 0)
 	{
-		BlockNumber relpages = RelationGetNumberOfBlocks(rel);
 		BlockNumber relallvisible;
 
 		if (rd_rel->relkind != RELKIND_INDEX)
@@ -2168,10 +2266,19 @@ index_update_stats(Relation rel,
 		else					/* don't bother for indexes */
 			relallvisible = 0;
 
-		if (rd_rel->relpages != (int32) relpages)
+		if (!isglobal)
 		{
-			rd_rel->relpages = (int32) relpages;
-			dirty = true;
+			BlockNumber relpages = RelationGetNumberOfBlocks(rel);
+
+			if (rd_rel->relpages != (int32) relpages)
+			{
+				rd_rel->relpages = (int32) relpages;
+				dirty = true;
+			}
+		}
+		else
+		{
+			/* TODO: calculate relpages for partitions? */
 		}
 		if (rd_rel->reltuples != (float4) reltuples)
 		{
@@ -2253,7 +2360,8 @@ index_build(Relation heapRelation,
 	 * Note that planner considers parallel safety for us.
 	 */
 	if (parallel && IsNormalProcessingMode() &&
-		indexRelation->rd_rel->relam == BTREE_AM_OID)
+		indexRelation->rd_rel->relam == BTREE_AM_OID &&
+		!indexInfo->ii_Global)
 		indexInfo->ii_ParallelWorkers =
 			plan_create_index_workers(RelationGetRelid(heapRelation),
 									  RelationGetRelid(indexRelation));
@@ -2361,13 +2469,20 @@ index_build(Relation heapRelation,
 	}
 
 	/*
-	 * Update heap and index pg_class rows
+	 * Update stats for heap relation (set 0 reltuples if it is a partitioned
+	 * parent)
+	 *
+	 * TODO: should we somehow change the format of IndexBuildResult to collect
+	 * stats for partitions and update it here?
 	 */
 	index_update_stats(heapRelation,
 					   true,
-					   stats->heap_tuples);
+					   indexInfo->ii_Global,
+					   indexInfo->ii_Global ? 0 : stats->heap_tuples);
 
+	/* Update stats for index relation (including global indexes) */
 	index_update_stats(indexRelation,
+					   false,
 					   false,
 					   stats->index_tuples);
 
@@ -2423,11 +2538,54 @@ IndexBuildHeapScan(Relation heapRelation,
 				   void *callback_state,
 				   HeapScanDesc scan)
 {
-	return IndexBuildHeapRangeScan(heapRelation, indexRelation,
-								   indexInfo, allow_sync,
-								   false,
-								   0, InvalidBlockNumber,
-								   callback, callback_state, scan);
+	double reltuples = 0;
+
+	if (!indexInfo->ii_Global)
+	{
+		reltuples = IndexBuildHeapRangeScan(heapRelation, indexRelation,
+											indexInfo, NULL,
+											allow_sync, false,
+											0, InvalidBlockNumber,
+											callback, callback_state, scan);
+	}
+	else
+	{
+		ListCell *lc;
+		List	 *children = list_make1_oid(RelationGetRelid(heapRelation));
+
+		foreach (lc, children)
+		{
+			Oid			childRelid = lfirst_oid(lc);
+			Relation	childRelation;
+			TupleConversionMap *attrmap;
+
+			/* Expand partitioned relations */
+			if (get_rel_relkind(childRelid) == RELKIND_PARTITIONED_TABLE)
+			{
+				children = list_concat(children,
+									   find_inheritance_children(childRelid, AccessShareLock));
+				continue;
+			}
+
+			childRelation = heap_open(childRelid, AccessShareLock);
+			attrmap = convert_tuples_by_name(RelationGetDescr(childRelation),
+											 RelationGetDescr(heapRelation),
+											 "IndexBuildHeapScan");
+
+			reltuples += IndexBuildHeapRangeScan(childRelation, indexRelation,
+												 indexInfo, attrmap,
+												 allow_sync, false,
+												 0, InvalidBlockNumber,
+												 callback, callback_state,
+												 scan);
+
+			if (attrmap)
+				free_conversion_map(attrmap);
+			heap_close(childRelation, AccessShareLock);
+		}
+	}
+
+	return reltuples;
 }
 
 /*
@@ -2444,6 +2602,7 @@ double
 IndexBuildHeapRangeScan(Relation heapRelation,
 						Relation indexRelation,
 						IndexInfo *indexInfo,
+						TupleConversionMap *attrmap,
 						bool allow_sync,
 						bool anyvisible,
 						BlockNumber start_blockno,
@@ -2855,8 +3014,16 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 
 		MemoryContextReset(econtext->ecxt_per_tuple_memory);
 
-		/* Set up for predicate or expression evaluation */
-		ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
+		/* Do the tuple conversion if required */
+		if (attrmap)
+		{
+			HeapTuple tmpTup = do_convert_tuple(heapTuple, attrmap);
+
+			/* Set up for predicate or expression evaluation */
+			ExecStoreTuple(tmpTup, slot, InvalidBuffer, false);
+		}
+		else
+			ExecStoreTuple(heapTuple, slot, InvalidBuffer, false);
 
 		/*
 		 * In a partial index, discard tuples that don't satisfy the
@@ -2878,6 +3045,14 @@ IndexBuildHeapRangeScan(Relation heapRelation,
 					   estate,
 					   values,
 					   isnull);
+
+		/* TODO: move following code to FormIndexDatum */
+		/* Set heap relid for global index */
+		if (indexInfo->ii_Global)
+		{
+			values[indexInfo->ii_NumIndexAttrs] = heapRelation->rd_id;
+			isnull[indexInfo->ii_NumIndexAttrs] = false;
+		}
 
 		/*
 		 * You'd think we should go ahead and build the index tuple here, but
@@ -3610,6 +3785,28 @@ IndexGetRelation(Oid indexId, bool missing_ok)
 	return result;
 }
 
+bool
+IndexIsGlobal(Oid indexId, bool missing_ok)
+{
+	HeapTuple	tuple;
+	Form_pg_index index;
+	bool		result;
+
+	tuple = SearchSysCache1(INDEXRELID, ObjectIdGetDatum(indexId));
+	if (!HeapTupleIsValid(tuple))
+	{
+		if (missing_ok)
+			return InvalidOid;
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+	}
+	index = (Form_pg_index) GETSTRUCT(tuple);
+	Assert(index->indexrelid == indexId);
+
+	result = index->indisglobal;
+	ReleaseSysCache(tuple);
+	return result;
+}
+
 /*
  * reindex_index - This routine is used to recreate a single index
  */
@@ -4149,4 +4346,94 @@ RestoreReindexState(void *reindexstate)
 			lappend_oid(pendingReindexedIndexes,
 						sistate->pendingReindexedIndexes[c]);
 	MemoryContextSwitchTo(oldcontext);
+}
+
+#define OidVectorSize(n)	(offsetof(oidvector, values) + (n) * sizeof(Oid))
+
+/*
+ * index_add_invalid_relid
+ *		Add relid to pg_index.indinvalidoids in a sorted manner
+ */
+void
+index_add_invalid_relid(Oid indexId, Oid relid)
+{
+	Relation	pg_index;
+	HeapTuple	tuple,
+				newtuple;
+	oidvector  *relids;
+	oidvector  *oldrelids;
+	Datum		values[Natts_pg_index];
+	bool		nulls[Natts_pg_index] = {false};
+	bool		doReplace[Natts_pg_index] = {false};
+	Size		oldsize;
+	int			i = 0,
+				j = 0;
+
+	/* Open pg_index and fetch a writable copy of the index's tuple */
+	pg_index = heap_open(IndexRelationId, RowExclusiveLock);
+	tuple = SearchSysCacheCopy1(INDEXRELID, ObjectIdGetDatum(indexId));
+
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+
+	/* transform tuple into values array */
+	heap_deform_tuple(tuple, RelationGetDescr(pg_index), values, nulls);
+	oldrelids = (oidvector *) values[Anum_pg_index_indinvalidoids - 1];
+	oldsize = oldrelids->dim1;
+	relids = buildoidvector(NULL, oldsize + 1);
+
+	/* copy values until we find Oid that is greater than given relid */
+	while (i < oldsize && relid > oldrelids->values[i])
+		relids->values[j++] = oldrelids->values[i++];
+
+	/* insert new relid */
+	relids->values[j++] = relid;
+
+	/* copy the rest */
+	while (i < oldsize)
+		relids->values[j++] = oldrelids->values[i++];
+
+	/* update values */
+	values[Anum_pg_index_indinvalidoids - 1] = (Datum) relids;
+	doReplace[Anum_pg_index_indinvalidoids - 1] = true;
+
+	/* update index form tuple */
+	newtuple = heap_modify_tuple(tuple, RelationGetDescr(pg_index),
+								 values, nulls, doReplace);
+	CatalogTupleUpdate(pg_index, &newtuple->t_self, newtuple);
+
+	heap_close(pg_index, RowExclusiveLock);
+}
+
+void
+index_clear_invalid_relids(Oid indexId)
+{
+	Relation	pg_index;
+	HeapTuple	tuple,
+				newtuple;
+	oidvector  *relids;
+	Datum		values[Natts_pg_index];
+	bool		nulls[Natts_pg_index] = {false};
+	bool		doReplace[Natts_pg_index] = {false};
+
+	/* Open pg_index and fetch a writable copy of the index's tuple */
+	pg_index = heap_open(IndexRelationId, RowExclusiveLock);
+
+	tuple = SearchSysCacheCopy1(INDEXRELID,
+									 ObjectIdGetDatum(indexId));
+	if (!HeapTupleIsValid(tuple))
+		elog(ERROR, "cache lookup failed for index %u", indexId);
+
+	heap_deform_tuple(tuple, RelationGetDescr(pg_index), values, nulls);
+
+	relids = buildoidvector(NULL, 0);
+	values[Anum_pg_index_indinvalidoids - 1] = (Datum) relids;
+	doReplace[Anum_pg_index_indinvalidoids - 1] = true;
+
+	/* Update index form tuple */
+	newtuple = heap_modify_tuple(tuple, RelationGetDescr(pg_index),
+								 values, nulls, doReplace);
+	CatalogTupleUpdate(pg_index, &newtuple->t_self, newtuple);
+
+	heap_close(pg_index, RowExclusiveLock);	
 }

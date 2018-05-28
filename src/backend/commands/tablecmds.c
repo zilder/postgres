@@ -1183,6 +1183,24 @@ RemoveRelations(DropStmt *drop)
 		obj.objectSubId = 0;
 
 		add_exact_object_address(&obj, objects);
+
+		/* Add relation oid to global indexes (if any) for future cleaning */
+		if (relkind == RELKIND_RELATION)
+		{
+			Relation	relation = heap_open(relOid, AccessExclusiveLock);
+			List	   *indexoids;
+			ListCell   *lc;
+
+			indexoids = RelationGetGlobalIndexList(relation);
+			foreach (lc, indexoids)
+			{
+				Oid indexOid = lfirst_oid(lc);
+
+				index_add_invalid_relid(indexOid, relOid);
+			}
+
+			heap_close(relation, AccessExclusiveLock);
+		}
 	}
 
 	performMultipleDeletions(objects, drop->behavior, flags);
@@ -1300,7 +1318,7 @@ RangeVarCallbackForDropRelation(const RangeVar *rel, Oid relOid, Oid oldRelOid,
 	 */
 	if (is_partition && relOid != oldRelOid)
 	{
-		state->partParentOid = get_partition_parent(relOid);
+		state->partParentOid = get_partition_parent(relOid, false);
 		if (OidIsValid(state->partParentOid))
 			LockRelationOid(state->partParentOid, AccessExclusiveLock);
 	}
@@ -5961,7 +5979,7 @@ ATExecDropNotNull(Relation rel, const char *colName, LOCKMODE lockmode)
 	/* If rel is partition, shouldn't drop NOT NULL if parent has the same */
 	if (rel->rd_rel->relispartition)
 	{
-		Oid			parentId = get_partition_parent(RelationGetRelid(rel));
+		Oid			parentId = get_partition_parent(RelationGetRelid(rel), false);
 		Relation	parent = heap_open(parentId, AccessShareLock);
 		TupleDesc	tupDesc = RelationGetDescr(parent);
 		AttrNumber	parent_attnum;
@@ -14694,8 +14712,8 @@ ATExecDetachPartition(Relation rel, RangeVar *name)
 		if (!has_superclass(idxid))
 			continue;
 
-		Assert((IndexGetRelation(get_partition_parent(idxid), false) ==
-				RelationGetRelid(rel)));
+		Assert((IndexGetRelation(get_partition_parent(idxid, false), false) ==
+			   RelationGetRelid(rel)));
 
 		idx = index_open(idxid, AccessExclusiveLock);
 		IndexSetParentIndex(idx, InvalidOid);
@@ -14825,7 +14843,7 @@ ATExecAttachPartitionIdx(List **wqueue, Relation parentIdx, RangeVar *name)
 
 	/* Silently do nothing if already in the right state */
 	currParent = partIdx->rd_rel->relispartition ?
-		get_partition_parent(partIdxId) : InvalidOid;
+		get_partition_parent(partIdxId, false) : InvalidOid;
 	if (currParent != RelationGetRelid(parentIdx))
 	{
 		IndexInfo  *childInfo;
@@ -15057,8 +15075,8 @@ validatePartitionedIndex(Relation partedIdx, Relation partedTbl)
 		/* make sure we see the validation we just did */
 		CommandCounterIncrement();
 
-		parentIdxId = get_partition_parent(RelationGetRelid(partedIdx));
-		parentTblId = get_partition_parent(RelationGetRelid(partedTbl));
+		parentIdxId = get_partition_parent(RelationGetRelid(partedIdx), false);
+		parentTblId = get_partition_parent(RelationGetRelid(partedTbl), false);
 		parentIdx = relation_open(parentIdxId, AccessExclusiveLock);
 		parentTbl = relation_open(parentTblId, AccessExclusiveLock);
 		Assert(!parentIdx->rd_index->indisvalid);

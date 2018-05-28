@@ -36,6 +36,8 @@
 #include "utils/index_selfuncs.h"
 #include "utils/memutils.h"
 
+#include "catalog/index.h"
+
 
 /* Working state needed by btvacuumpage */
 typedef struct
@@ -1182,6 +1184,7 @@ restart:
 		OffsetNumber offnum,
 					minoff,
 					maxoff;
+		bool hasinvalidoids = vstate->info->ninvalidoids;
 
 		/*
 		 * Trade in the initial read lock for a super-exclusive write lock on
@@ -1220,7 +1223,7 @@ restart:
 		ndeletable = 0;
 		minoff = P_FIRSTDATAKEY(opaque);
 		maxoff = PageGetMaxOffsetNumber(page);
-		if (callback)
+		if (callback || hasinvalidoids)
 		{
 			for (offnum = minoff;
 				 offnum <= maxoff;
@@ -1254,8 +1257,20 @@ restart:
 				 * applies to *any* type of index that marks index tuples as
 				 * killed.
 				 */
-				if (callback(htup, callback_state))
+				if (callback && callback(htup, callback_state))
 					deletable[ndeletable++] = offnum;
+
+				if (hasinvalidoids)
+				{
+					TupleDesc tupdesc = RelationGetDescr(vstate->info->index);
+					Oid		relid;
+
+					relid = index_tuple_extract_relid(itup, tupdesc);
+					if (bsearch(&relid, vstate->info->invalidoids,
+								vstate->info->ninvalidoids, sizeof(Oid),
+								oid_cmp) != NULL)
+						deletable[ndeletable++] = offnum;
+				}
 			}
 		}
 

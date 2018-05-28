@@ -162,6 +162,7 @@ typedef struct IndexInfo
 	Oid		   *ii_UniqueProcs; /* array with one entry per column */
 	uint16	   *ii_UniqueStrats;	/* array with one entry per column */
 	bool		ii_Unique;
+	bool		ii_Global;
 	bool		ii_ReadyForInserts;
 	bool		ii_Concurrent;
 	bool		ii_BrokenHotChain;
@@ -490,6 +491,8 @@ typedef struct EState
 	ResultRelInfo *es_result_relations; /* array of ResultRelInfos */
 	int			es_num_result_relations;	/* length of array */
 	ResultRelInfo *es_result_relation_info; /* currently active array elt */
+
+	Oid			es_currentPartitionRelid; /* partition being modified */
 
 	/*
 	 * Info about the target partitioned target table root(s) for
