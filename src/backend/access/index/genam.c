@@ -188,7 +188,7 @@ BuildIndexValueDescription(Relation indexRelation,
 	Oid			indrelid;
 	AclResult	aclresult;
 
-	indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRelation);
+	// indnkeyatts = IndexRelationGetNumberOfKeyAttributes(indexRelation) - (idxrec->indisglobal ? 1 : 0);
 
 	/*
 	 * Check permissions- if the user does not have access to view all of the
@@ -209,6 +209,7 @@ BuildIndexValueDescription(Relation indexRelation,
 		elog(ERROR, "cache lookup failed for index %u", indexrelid);
 	idxrec = (Form_pg_index) GETSTRUCT(ht_idx);
 
+	indnkeyatts = indexRelation->rd_rel->relnatts - (idxrec->indisglobal ? 1 : 0);
 	indrelid = idxrec->indrelid;
 	Assert(indexrelid == idxrec->indexrelid);
 

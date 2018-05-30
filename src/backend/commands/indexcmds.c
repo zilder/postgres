@@ -468,6 +468,7 @@ DefineIndex(Oid relationId,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
 					 errmsg("cannot create index on partitioned table \"%s\" concurrently",
 							RelationGetRelationName(rel))));
+
 		if (stmt->excludeOpNames)
 			ereport(ERROR,
 					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
@@ -686,7 +687,7 @@ DefineIndex(Oid relationId,
 	 * We could lift this limitation if we had global indexes, but those have
 	 * their own problems, so this is a useful feature combination.
 	 */
-	if (partitioned && (stmt->unique || stmt->primary))
+	if (partitioned && (stmt->unique || stmt->primary) && !stmt->global)
 	{
 		PartitionKey key = rel->rd_partkey;
 		int			i;
